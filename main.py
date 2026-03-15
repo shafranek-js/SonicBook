@@ -25,8 +25,6 @@ if sys.platform == 'win32':
 app = FastAPI(title="SonicBook API")
 DOWNLOADS_DIR = "downloads"
 DEBUG_LOG = "app_debug.log"
-
-# ВОЗВРАЩАЕМ ПОЛНЫЕ ПУТИ ДЛЯ ВАШЕЙ СИСТЕМЫ
 FFMPEG_PATH = r"C:\Users\pavel\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.WinGet.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin\ffmpeg.exe"
 FFPROBE_PATH = r"C:\Users\pavel\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.WinGet.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin\ffprobe.exe"
 
@@ -89,7 +87,11 @@ def extract_chapters_from_html(html_content):
                 candidate = lines[j]
                 if candidate in {"15 c", "1x", "100%", "Скорость", "Главы", "Список глав", "Закрыть"}: j += 1; continue
                 if re.match(r"^(?:\d{2}:)?\d{2}:\d{2}$", candidate): break
-                tracks.append({"duration": duration, "title": candidate.strip()}); i = j; break
+                title = candidate.strip()
+                if len(title) > 1 and not re.match(r"^[/\s\-]+$", title):
+                    tracks.append({"duration": duration, "title": title})
+                    i = j; break
+                j += 1
             i += 1; continue
         if re.match(r"^(?:\d{2}:)?\d{2}:\d{2}$", line):
             duration = line
@@ -98,7 +100,11 @@ def extract_chapters_from_html(html_content):
                 candidate = lines[j]
                 if not candidate or candidate in {"15 c", "1x", "100%", "Скорость"}: j += 1; continue
                 if re.match(r"^(?:\d{2}:)?\d{2}:\d{2}$", candidate) or candidate.isdigit(): break
-                tracks.append({"duration": duration, "title": candidate.strip()}); i = j; break
+                title = candidate.strip()
+                if len(title) > 1 and not re.match(r"^[/\s\-]+$", title):
+                    tracks.append({"duration": duration, "title": title})
+                    i = j; break
+                j += 1
         i += 1
     chapters = []; current_start = 0
     for t in tracks:
@@ -143,25 +149,34 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id):
     with open(meta_path, "w", encoding="utf-8") as f: f.write(meta_content)
     final_filename = f"{title_base}.m4b"
     final_path = os.path.join(DOWNLOADS_DIR, final_filename)
-    cmd = [FFMPEG_PATH, "-y", "-i", source_file, "-i", meta_path, "-map_metadata", "1", "-c:a", "copy", final_path]
+    cmd = [FFMPEG_PATH, "-y", "-i", source_file, "-i", metadata_path, "-map_metadata", "1", "-c:a", "copy", final_path]
     p = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
     await p.wait()
     if os.path.exists(meta_path): os.remove(meta_path)
     return final_filename
 
-async def split_to_chapters(source_file, chapters, title_base, task_id):
+async def split_to_chapters(source_file, chapters, title_base, task_id, source_ext):
+    """Нарезает файл на главы БЕЗ ПЕРЕКОДИРОВАНИЯ (copy)"""
+    log_debug(f"Fast splitting into {len(chapters)} files...")
     temp_dir = os.path.join(DOWNLOADS_DIR, f"split_{task_id}")
     os.makedirs(temp_dir, exist_ok=True)
+    
     split_files = []
+    # Используем расширение источника (обычно .m4a или .mp4)
+    ext = source_ext if source_ext != '.mp4' else '.m4a'
+    
     for i, ch in enumerate(chapters):
         ch_title = sanitize_filename(f"{i+1:03d} - {ch['title']}")
-        out = os.path.join(temp_dir, f"{ch_title}.mp3")
+        out = os.path.join(temp_dir, f"{ch_title}{ext}")
         dur = ch['end'] - ch['start']
         if dur <= 0: continue
-        cmd = [FFMPEG_PATH, "-y", "-ss", str(ch['start']), "-t", str(dur), "-i", source_file, "-c:a", "libmp3lame", "-b:a", "128k", out]
+        
+        # КОМАНДА: -c copy (Мгновенно)
+        cmd = [FFMPEG_PATH, "-y", "-ss", str(ch['start']), "-t", str(dur), "-i", source_file, "-c", "copy", out]
         p = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         await p.wait()
         split_files.append(out)
+    
     if not split_files: return None
     zip_name = f"{title_base}.zip"
     zip_path = os.path.join(DOWNLOADS_DIR, zip_name)
@@ -180,9 +195,7 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode):
             total_frags = len([l for l in r.text.splitlines() if l.strip() and not l.startswith('#')])
     except: pass
     progress_store[task_id]["total_frags"] = total_frags
-
     command = [sys.executable, "-m", "yt_dlp", m3u8_url, "-o", f"{temp_base}.%(ext)s", "--concurrent-fragments", "16", "--ffmpeg-location", FFMPEG_PATH, "--newline", "--no-colors"]
-    
     try:
         process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         buffer = ""
@@ -204,27 +217,22 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode):
                     pct = round((curr_t / total_dur) * 95.0, 3)
                     progress_store[task_id]["percent"] = min(95.0, pct)
                     if total_frags > 0: progress_store[task_id]["current_frag"] = int(total_frags * (pct / 95))
-
         progress_store[task_id]["status"] = "merging"
         await process.wait()
         
-        source = ""
+        source = ""; source_ext = ""
         for ext in ['.mp4', '.m4a', '.mp3']:
-            if os.path.exists(temp_base + ext): source = temp_base + ext; break
+            if os.path.exists(temp_base + ext): source = temp_base + ext; source_ext = ext; break
         
         if source:
             final_file = ""
-            if mode == "zip" and chapters: final_file = await split_to_chapters(source, chapters, title_base, task_id)
-            elif mode == "m4b" and chapters: final_file = await create_m4b_with_chapters(source, chapters, title_base, task_id)
-            elif mode == "mp3":
-                final_file = f"{title_base}.mp3"
-                dest = os.path.join(DOWNLOADS_DIR, final_file)
-                cmd = [FFMPEG_PATH, "-y", "-i", source, "-c:a", "libmp3lame", "-b:a", "128k", dest]
-                p = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-                await p.wait()
+            if mode == "zip" and chapters:
+                final_file = await split_to_chapters(source, chapters, title_base, task_id, source_ext)
+            elif mode == "m4b" and chapters:
+                final_file = await create_m4b_with_chapters(source, chapters, title_base, task_id)
             else:
-                ext = os.path.splitext(source)[1]
-                final_file = f"{title_base}{ext}"
+                # Оставляем исходный формат (copy)
+                final_file = f"{title_base}{source_ext}"
                 dest = os.path.join(DOWNLOADS_DIR, final_file)
                 if os.path.exists(dest): os.remove(dest)
                 os.rename(source, dest)
