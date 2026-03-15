@@ -1,6 +1,6 @@
 # 🚀 SonicBook
 
-**SonicBook** is a high-speed audiobook downloader designed specifically for `akniga.org`. It combines extreme download speeds with smart chapter splitting, making it the ultimate tool for audiobook enthusiasts.
+**SonicBook** is a high-speed audiobook downloader designed specifically for audiobook streaming sites. It combines extreme download speeds with smart chapter splitting, making it the ultimate tool for audiobook enthusiasts.
 
 ## ✨ Features
 
