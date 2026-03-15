@@ -133,23 +133,37 @@
             if(!url) return;
             const btn = document.getElementById('mainBtn');
             const statusDiv = document.getElementById('status');
+            const chaptersBox = document.getElementById('chaptersBox');
+            const chaptersList = document.getElementById('chaptersList');
+            
             btn.disabled = true;
             statusDiv.style.display = 'block';
             statusDiv.innerText = i18n[currentLang].statusInit;
+            chaptersBox.style.display = 'none';
             
             try {
-                const res = await fetch('/api/info', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url}) });
-                if (!res.ok) throw new Error('Book not found or protected');
+                const res = await fetch('/api/info', { 
+                    method: 'POST', 
+                    headers: {'Content-Type':'application/json'}, 
+                    body: JSON.stringify({url}) 
+                });
+                
+                if (!res.ok) throw new Error('Book info fetch failed');
                 const data = await res.json();
                 
                 if (data.chapters && data.chapters.length > 0) {
-                    document.getElementById('chaptersList').innerHTML = data.chapters.map((c, i) => `<div class="chapter-item">${i+1}. ${c.title}</div>`).join('');
-                    document.getElementById('chaptersBox').style.display = 'block';
+                    chaptersList.innerHTML = data.chapters.map((c, i) => `
+                        <div class="chapter-item">
+                            <span class="chapter-title">${i+1}. ${c.title}</span>
+                        </div>
+                    `).join('');
+                    chaptersBox.style.display = 'block';
                     statusDiv.style.display = 'none';
                 } else {
                     statusDiv.innerText = i18n[currentLang].noChapters;
                 }
-                step = 'confirm'; updateUI();
+                step = 'confirm'; 
+                updateUI();
             } catch(e) { 
                 statusDiv.innerText = 'Error: ' + e.message;
                 statusDiv.style.color = 'var(--error)';

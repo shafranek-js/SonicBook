@@ -1,0 +1,150 @@
+import re
+import asyncio
+import httpx
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+import config
+
+def log_debug(message):
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open(config.DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {message}\n")
+    except: pass
+    print(f"DEBUG: {message}")
+
+def parse_time_to_seconds(value: str) -> int:
+    try:
+        parts = value.split(":")
+        if len(parts) == 2: return int(parts[0]) * 60 + int(parts[1])
+        if len(parts) == 3: return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    except: pass
+    return 0
+
+def extract_chapters_from_html(html_content):
+    soup = BeautifulSoup(html_content, "html.parser")
+    text = soup.get_text("\n", strip=True)
+    start_marker, end_marker = "Список глав", "Скрыть главы"
+    
+    if start_marker in text and end_marker in text:
+        text = text.split(start_marker, 1)[1].split(end_marker, 1)[0]
+    
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    tracks = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m_first = re.match(r"^\d{2}:\d{2}\s*/\s*((?:\d{2}:)?\d{2}:\d{2})$", line)
+        if m_first:
+            duration = m_first.group(1)
+            j = i + 1
+            while j < len(lines):
+                candidate = lines[j]
+                if candidate in {"15 c", "1x", "100%", "Скорость", "Главы", "Список глав", "Закрыть"}: 
+                    j += 1; continue
+                if re.match(r"^(?:\d{2}:)?\d{2}:\d{2}$", candidate): break
+                title = candidate.strip()
+                # ФИЛЬТРАЦИЯ: пропускаем строки, состоящие только из знаков препинания
+                if title and not re.match(r"^[/\s\-\.,_]+$", title):
+                    tracks.append({"duration": duration, "title": title})
+                    i = j; break
+                j += 1
+            i += 1; continue
+        if re.match(r"^(?:\d{2}:)?\d{2}:\d{2}$", line):
+            duration = line
+            j = i + 1
+            while j < len(lines):
+                candidate = lines[j]
+                if not candidate or candidate in {"15 c", "1x", "100%", "Скорость"}: 
+                    j += 1; continue
+                if re.match(r"^(?:\d{2}:)?\d{2}:\d{2}$", candidate) or candidate.isdigit(): break
+                title = candidate.strip()
+                # ФИЛЬТРАЦИЯ: пропускаем мусорные строки
+                if title and not re.match(r"^[/\s\-\.,_]+$", title):
+                    tracks.append({"duration": duration, "title": title})
+                    i = j; break
+                j += 1
+        i += 1
+    
+    chapters = []
+    current_start = 0
+    for t in tracks:
+        dur_sec = parse_time_to_seconds(t["duration"])
+        chapters.append({"title": t["title"], "start": current_start, "end": current_start + dur_sec})
+        current_start += dur_sec
+    return chapters
+
+async def get_book_info(book_url):
+    log_debug(f"Combined info scraping: {book_url}")
+    res = {"m3u8": None, "title": "audiobook", "chapters": []}
+    
+    # Text-based parsing (Fast)
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": "https://akniga.org/"
+        }
+        async with httpx.AsyncClient(http2=True) as client:
+            resp = await client.get(book_url, headers=headers, timeout=20, follow_redirects=True)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                h1 = soup.find("h1")
+                if h1: res["title"] = h1.get_text().strip()
+                res["chapters"] = extract_chapters_from_html(resp.text)
+    except Exception as e: log_debug(f"BS4 parse error: {e}")
+
+    # Browser-based parsing (for m3u8)
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            
+            # Блокируем только картинки и медиа для скорости (оставляем CSS, так как он может быть нужен плееру)
+            await page.route("**/*.{png,jpg,jpeg,svg,woff,woff2,ico}", lambda route: route.abort())
+            page.on("request", lambda r: res.update({"m3u8": r.url}) if ".m3u8" in r.url else None)
+            
+            await page.goto(book_url, wait_until="domcontentloaded", timeout=30000)
+            
+            for _ in range(15):
+                if res["m3u8"]: break
+                if _ == 5:
+                    try:
+                        # Агрессивный клик через JS работает надежнее
+                        await page.evaluate("document.querySelector('.button__player--play, .js-player-play')?.click()")
+                        log_debug("Play clicked via JS")
+                    except: pass
+                await asyncio.sleep(1)
+
+            if not res["chapters"]:
+                log_debug("BS4 chapters empty, parsing DOM elements (.ls-item)...")
+                res["chapters"] = await page.evaluate("""() => {
+                    let items = [];
+                    document.querySelectorAll('.ls-item').forEach(el => {
+                        let titleEl = el.querySelector('.ls-title');
+                        let timeEl = el.querySelector('.ls-time');
+                        if (titleEl) {
+                            items.push({
+                                title: titleEl.innerText.trim(),
+                                start: parseFloat(el.getAttribute('data-time') || 0),
+                                end: 0
+                            });
+                        }
+                    });
+                    let jsData = window.items || window.playlist;
+                    if (jsData && Array.isArray(jsData)) {
+                        return jsData.map(i => ({title: i.title, start: i.time_from_start, end: i.time_finish}));
+                    }
+                    return items;
+                }""")
+                log_debug(f"DOM parsing found {len(res['chapters'])} chapters")
+            
+            if not res["chapters"] and res["title"] != "audiobook":
+                res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
+
+            await browser.close()
+    except Exception as e: log_debug(f"Playwright error: {e}")
+
+    return res["m3u8"], res["title"], res["chapters"]
