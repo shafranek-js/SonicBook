@@ -45,7 +45,7 @@
         
         <div class="options-group" id="optGroup">
             <button class="opt-btn active" id="mode-m4b" onclick="setMode('m4b')">M4B (Chapters)</button>
-            <button class="opt-btn" id="mode-mp3" onclick="setMode('mp3')">Single MP3</button>
+            <button class="opt-btn" id="mode-mp3" onclick="setMode('mp3')">Single File</button>
             <button class="opt-btn" id="mode-zip" onclick="setMode('zip')">ZIP (Split)</button>
         </div>
 
@@ -74,13 +74,15 @@
                 subtitle: "Advanced Audiobook Downloader", placeholder: "Paste link here...",
                 btnStart: "Start Download", btnFetch: "Fetch Info", btnConfirm: "Confirm & Download", btnAgain: "Download Another",
                 statusInit: "Initializing...", statusStreams: "Downloading...", statusMerging: "Finalizing & Metadata...",
-                statusDone: "Ready!", found: "Chapters found:", noChapters: "No chapters found. Will download as single file.", saveBtn: "📥 Save Result"
+                statusDone: "Ready!", found: "Chapters found:", noChapters: "No chapters found. Will download as single file.", saveBtn: "📥 Save Result",
+                modeSingle: "Single File"
             },
             ru: {
                 subtitle: "Продвинутый загрузчик аудиокниг", placeholder: "Вставьте ссылку...",
                 btnStart: "Начать загрузку", btnFetch: "Найти главы", btnConfirm: "Подтвердить и скачать", btnAgain: "Загрузить еще одну",
                 statusInit: "Инициализация...", statusStreams: "Загрузка...", statusMerging: "Сборка и метаданные...",
-                statusDone: "Готово!", found: "Найденные главы:", noChapters: "Главы не найдены. Будет скачано одним файлом.", saveBtn: "📥 Сохранить результат"
+                statusDone: "Готово!", found: "Найденные главы:", noChapters: "Главы не найдены. Будет скачано одним файлом.", saveBtn: "📥 Сохранить результат",
+                modeSingle: "Одним файлом"
             }
         };
 
@@ -99,6 +101,7 @@
             document.getElementById('t-subtitle').innerText = t.subtitle;
             document.getElementById('urlInput').placeholder = t.placeholder;
             document.getElementById('downloadLink').innerText = t.saveBtn;
+            document.getElementById('mode-mp3').innerText = t.modeSingle;
             document.getElementById('langBtn').innerText = currentLang === 'en' ? 'RU' : 'EN';
             document.getElementById('t-found').innerText = t.found;
             const btn = document.getElementById('mainBtn');
