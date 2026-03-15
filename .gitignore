@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# App Specific
+downloads/
+*.log
+debug_page.html
+debug_screenshot.png
+trace_scraping*.py
+inspect_*.py
+capture_debug.py
+debug_scrapers.py
+debug_ajax_fix.py
+debug_regex.py
+
+# OS
+.DS_Store
+Thumbs.db
