@@ -110,8 +110,18 @@
         }
 
         function toggleLang() { currentLang = currentLang === 'en' ? 'ru' : 'en'; localStorage.setItem('lang', currentLang); updateUI(); }
-        function toggleTheme() { document.body.classList.toggle('light-theme'); }
-        updateUI();
+        function toggleTheme() {
+            const isLight = document.body.classList.toggle('light-theme');
+            document.getElementById('themeBtn').innerText = isLight ? '☀️' : '🌙';
+            localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        }
+
+        // Init
+        if (localStorage.getItem('theme') === 'light') {
+            document.body.classList.add('light-theme');
+            document.getElementById('themeBtn').innerText = '☀️';
+        }
+
 
         async function handleAction() {
             if ((currentMode === 'm4b' || currentMode === 'zip') && step === 'start') await fetchInfo();
