@@ -3,36 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Downloader</title>
+    <title>SonicBook Downloader</title>
     <style>
         :root { --primary: #6366F1; --bg: #0F172A; --card: #1E293B; --text: #F8FAFC; --muted: #94A3B8; --success: #10B981; --error: #FB7185; --border: #334155; }
         body.light-theme { --bg: #F3F4F6; --card: #FFFFFF; --text: #1F2937; --muted: #6B7280; --border: #E5E7EB; }
         * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.3s, color 0.3s; }
         body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-        .container { background: var(--card); padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; max-width: 500px; text-align: center; position: relative; }
+        .container { background: var(--card); padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; max-width: 550px; text-align: center; position: relative; }
         .controls { position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; }
-        .btn-icon { background: none; border: 1px solid var(--border); color: var(--muted); width: 40px; height: 40px; border-radius: 10px; cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 1.1rem; }
-        .btn-icon:hover { border-color: var(--primary); color: var(--primary); }
+        .btn-icon { background: none; border: 1px solid var(--border); color: var(--muted); width: 40px; height: 40px; border-radius: 10px; cursor: pointer; display: flex; justify-content: center; align-items: center; }
         input { width: 100%; padding: 14px; border: 2px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); margin-bottom: 15px; outline: none; }
-        .options-group { display: flex; gap: 10px; margin-bottom: 20px; justify-content: center; }
-        .opt-btn { flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: none; color: var(--muted); cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+        
+        .options-group { display: flex; gap: 8px; margin-bottom: 20px; }
+        .opt-btn { flex: 1; padding: 10px 5px; border: 1px solid var(--border); border-radius: 10px; background: none; color: var(--muted); cursor: pointer; font-size: 0.8rem; font-weight: 600; }
         .opt-btn.active { border-color: var(--primary); color: var(--primary); background: rgba(99, 102, 241, 0.1); }
-        button#mainBtn { width: 100%; padding: 14px; background: var(--primary); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 1rem; }
+
+        button#mainBtn { width: 100%; padding: 14px; background: var(--primary); color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: 600; }
         button#mainBtn:disabled { opacity: 0.5; }
         
-        .chapters-box { display: none; text-align: left; margin: 20px 0; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 15px; max-height: 200px; overflow-y: auto; border: 1px solid var(--border); }
-        .chapter-item { font-size: 0.85rem; padding: 5px 0; border-bottom: 1px solid var(--border); color: var(--muted); }
-        .chapter-item:last-child { border: none; }
-        .chapter-title { color: var(--text); font-weight: 500; }
-
-        .threads-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin: 20px 0; display: none; }
-        .led { height: 5px; background: var(--border); border-radius: 3px; }
-        .led.active { background: var(--primary); box-shadow: 0 0 8px var(--primary); animation: pulse 0.6s infinite alternate; }
-        @keyframes pulse { from { opacity: 0.3; } to { opacity: 1; } }
+        .chapters-box { display: none; text-align: left; margin: 20px 0; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 15px; max-height: 180px; overflow-y: auto; border: 1px solid var(--border); }
+        .chapter-item { font-size: 0.8rem; padding: 4px 0; border-bottom: 1px solid var(--border); color: var(--muted); }
         .progress-box { display: none; margin-top: 20px; }
         .bar-bg { width: 100%; background: var(--border); border-radius: 10px; height: 10px; overflow: hidden; }
         .bar-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.3s linear; }
-        .stats { display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.85rem; font-family: monospace; }
+        .stats { display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.8rem; font-family: monospace; }
         #downloadLink { display: none; margin-top: 20px; padding: 14px; background: var(--success); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; text-align: center; }
         .merging-mode .bar-fill { animation: shimmer 2s infinite linear; background: linear-gradient(90deg, var(--primary) 25%, #fbbf24 50%, var(--primary) 75%); background-size: 200% 100%; }
         @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
@@ -44,26 +38,27 @@
             <button class="btn-icon" onclick="toggleLang()" id="langBtn">RU</button>
             <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
         </div>
-        <h1 id="t-title">Audio Downloader</h1>
-        <p id="t-subtitle" style="color: var(--muted); margin-bottom: 20px; font-size: 0.9rem;">Stable multi-threaded download</p>
+        <h1 id="t-title">SonicBook</h1>
+        <p id="t-subtitle" style="color: var(--muted); margin-bottom: 20px; font-size: 0.9rem;">Advanced Audiobook Downloader</p>
         
         <input type="text" id="urlInput" placeholder="Paste link here...">
         
         <div class="options-group" id="optGroup">
-            <button class="opt-btn active" id="mode-single" onclick="setMode(false)">Single File</button>
-            <button class="opt-btn" id="mode-chapters" onclick="setMode(true)">By Chapters (ZIP)</button>
+            <button class="opt-btn active" id="mode-m4b" onclick="setMode('m4b')">M4B (Chapters)</button>
+            <button class="opt-btn" id="mode-mp3" onclick="setMode('mp3')">Single MP3</button>
+            <button class="opt-btn" id="mode-zip" onclick="setMode('zip')">ZIP (Split)</button>
         </div>
 
         <div id="chaptersBox" class="chapters-box">
-            <div style="font-weight: 600; margin-bottom: 10px; font-size: 0.9rem;" id="t-found">Chapters found:</div>
+            <div style="font-weight: 600; margin-bottom: 10px; font-size: 0.85rem;" id="t-found">Chapters found:</div>
             <div id="chaptersList"></div>
         </div>
 
+        <div id="status" style="margin-bottom: 10px; font-size: 0.85rem; display: none;"></div>
+
         <button id="mainBtn" onclick="handleAction()">Start Download</button>
         
-        <div class="threads-grid" id="grid"></div>
         <div class="progress-box" id="pbox">
-            <div id="status" style="margin-bottom: 10px; font-size: 0.9rem;"></div>
             <div class="bar-bg"><div class="bar-fill" id="bar"></div></div>
             <div class="stats">
                 <span id="perc">0.000%</span>
@@ -76,51 +71,26 @@
     <script>
         const i18n = {
             en: {
-                subtitle: "Stable multi-threaded download",
-                placeholder: "Paste link here...",
-                btnStart: "Start Download",
-                btnFetch: "Fetch Chapters",
-                btnConfirm: "Confirm & Download",
-                btnAgain: "Download Another",
-                modeSingle: "Single File",
-                modeChapters: "By Chapters (ZIP)",
-                statusInit: "Initializing...",
-                statusStreams: "Downloading...",
-                statusMerging: "Finalizing...",
-                statusDone: "Ready!",
-                found: "Chapters found:",
-                noChapters: "No chapters found. Will download as single file.",
-                saveBtn: "📥 Save Result",
-                frag: "Fragments:"
+                subtitle: "Advanced Audiobook Downloader", placeholder: "Paste link here...",
+                btnStart: "Start Download", btnFetch: "Fetch Info", btnConfirm: "Confirm & Download", btnAgain: "Download Another",
+                statusInit: "Initializing...", statusStreams: "Downloading...", statusMerging: "Finalizing & Metadata...",
+                statusDone: "Ready!", found: "Chapters found:", noChapters: "No chapters found. Will download as single file.", saveBtn: "📥 Save Result"
             },
             ru: {
-                subtitle: "Стабильная многопоточная загрузка",
-                placeholder: "Вставьте ссылку...",
-                btnStart: "Начать загрузку",
-                btnFetch: "Найти главы",
-                btnConfirm: "Подтвердить и скачать",
-                btnAgain: "Загрузить еще одну",
-                modeSingle: "Одним файлом",
-                modeChapters: "По главам (ZIP)",
-                statusInit: "Инициализация...",
-                statusStreams: "Загрузка...",
-                statusMerging: "Сборка...",
-                statusDone: "Готово!",
-                found: "Найденные главы:",
-                noChapters: "Главы не найдены. Будет скачано одним файлом.",
-                saveBtn: "📥 Сохранить результат",
-                frag: "Фрагменты:"
+                subtitle: "Продвинутый загрузчик аудиокниг", placeholder: "Вставьте ссылку...",
+                btnStart: "Начать загрузку", btnFetch: "Найти главы", btnConfirm: "Подтвердить и скачать", btnAgain: "Загрузить еще одну",
+                statusInit: "Инициализация...", statusStreams: "Загрузка...", statusMerging: "Сборка и метаданные...",
+                statusDone: "Готово!", found: "Найденные главы:", noChapters: "Главы не найдены. Будет скачано одним файлом.", saveBtn: "📥 Сохранить результат"
             }
         };
 
         let currentLang = localStorage.getItem('lang') || 'en';
-        let splitChapters = false;
-        let step = 'start'; // 'start', 'confirm'
+        let currentMode = 'm4b';
+        let step = 'start';
 
-        function setMode(val) {
-            splitChapters = val;
-            document.getElementById('mode-single').classList.toggle('active', !val);
-            document.getElementById('mode-chapters').classList.toggle('active', val);
+        function setMode(mode) {
+            currentMode = mode;
+            ['m4b', 'mp3', 'zip'].forEach(m => document.getElementById('mode-'+m).classList.toggle('active', m === mode));
             updateUI();
         }
 
@@ -128,67 +98,51 @@
             const t = i18n[currentLang];
             document.getElementById('t-subtitle').innerText = t.subtitle;
             document.getElementById('urlInput').placeholder = t.placeholder;
-            document.getElementById('mode-single').innerText = t.modeSingle;
-            document.getElementById('mode-chapters').innerText = t.modeChapters;
             document.getElementById('downloadLink').innerText = t.saveBtn;
             document.getElementById('langBtn').innerText = currentLang === 'en' ? 'RU' : 'EN';
             document.getElementById('t-found').innerText = t.found;
-            
             const btn = document.getElementById('mainBtn');
-            if (step === 'start') {
-                btn.innerText = splitChapters ? t.btnFetch : t.btnStart;
-            } else if (step === 'confirm') {
-                btn.innerText = t.btnConfirm;
-            }
+            if (step === 'start') btn.innerText = (currentMode === 'm4b' || currentMode === 'zip') ? t.btnFetch : t.btnStart;
+            else if (step === 'confirm') btn.innerText = t.btnConfirm;
         }
 
         function toggleLang() { currentLang = currentLang === 'en' ? 'ru' : 'en'; localStorage.setItem('lang', currentLang); updateUI(); }
         function toggleTheme() { document.body.classList.toggle('light-theme'); }
-        
         updateUI();
-        const grid = document.getElementById('grid');
-        for(let i=0; i<16; i++) { const d = document.createElement('div'); d.className='led'; d.id='l'+i; grid.appendChild(d); }
 
         async function handleAction() {
-            if (splitChapters && step === 'start') {
-                await fetchInfo();
-            } else {
-                await startDownload();
-            }
+            if ((currentMode === 'm4b' || currentMode === 'zip') && step === 'start') await fetchInfo();
+            else await startDownload();
         }
 
         async function fetchInfo() {
             const url = document.getElementById('urlInput').value.trim();
             if(!url) return;
             const btn = document.getElementById('mainBtn');
+            const statusDiv = document.getElementById('status');
             btn.disabled = true;
-            document.getElementById('status').innerText = i18n[currentLang].statusInit;
-            document.getElementById('pbox').style.display = 'block';
-
+            statusDiv.style.display = 'block';
+            statusDiv.innerText = i18n[currentLang].statusInit;
+            
             try {
-                const res = await fetch('/api/info', {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({url})
-                });
+                const res = await fetch('/api/info', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url}) });
+                if (!res.ok) throw new Error('Book not found or protected');
                 const data = await res.json();
                 
                 if (data.chapters && data.chapters.length > 0) {
-                    const list = document.getElementById('chaptersList');
-                    list.innerHTML = data.chapters.map((c, i) => `
-                        <div class="chapter-item">
-                            <span class="chapter-title">${i+1}. ${c.title}</span>
-                        </div>
-                    `).join('');
+                    document.getElementById('chaptersList').innerHTML = data.chapters.map((c, i) => `<div class="chapter-item">${i+1}. ${c.title}</div>`).join('');
                     document.getElementById('chaptersBox').style.display = 'block';
-                    step = 'confirm';
+                    statusDiv.style.display = 'none';
                 } else {
-                    document.getElementById('status').innerText = i18n[currentLang].noChapters;
-                    step = 'confirm';
+                    statusDiv.innerText = i18n[currentLang].noChapters;
                 }
-                document.getElementById('optGroup').style.display = 'none';
-                updateUI();
-            } catch(e) { alert(e); } finally { btn.disabled = false; }
+                step = 'confirm'; updateUI();
+            } catch(e) { 
+                statusDiv.innerText = 'Error: ' + e.message;
+                statusDiv.style.color = 'var(--error)';
+            } finally { 
+                btn.disabled = false; 
+            }
         }
 
         async function startDownload() {
@@ -199,44 +153,40 @@
             document.getElementById('chaptersBox').style.display = 'none';
             document.getElementById('optGroup').style.display = 'none';
             document.getElementById('pbox').style.display = 'block';
-            document.getElementById('grid').style.display = 'grid';
             document.getElementById('pbox').classList.remove('merging-mode');
-            document.getElementById('status').innerText = i18n[currentLang].statusInit;
+            const statusDiv = document.getElementById('status');
+            statusDiv.style.display = 'block';
+            statusDiv.innerText = i18n[currentLang].statusInit;
             
             try {
-                const res = await fetch('/api/download', { 
-                    method: 'POST', 
-                    headers: {'Content-Type':'application/json'}, 
-                    body: JSON.stringify({url, split_chapters: splitChapters}) 
-                });
+                const res = await fetch('/api/download', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url, mode: currentMode}) });
                 const data = await res.json();
                 poll(data.task_id);
             } catch(e) { alert(e); document.getElementById('mainBtn').disabled = false; }
         }
 
         function poll(id) {
-            const interval = setInterval(async () => {
+            const int = setInterval(async () => {
                 const res = await fetch('/api/progress/' + id);
                 const data = await res.json();
                 const t = i18n[currentLang];
+                const statusDiv = document.getElementById('status');
                 if(data.status === 'processing' || data.status === 'merging') {
-                    document.getElementById('status').innerText = data.status === 'merging' ? t.statusMerging : t.statusStreams;
+                    statusDiv.innerText = data.status === 'merging' ? t.statusMerging : t.statusStreams;
                     if(data.status === 'merging') document.getElementById('pbox').classList.add('merging-mode');
                     document.getElementById('bar').style.width = data.percent + '%';
                     document.getElementById('perc').innerText = data.percent.toFixed(3) + '%';
                     document.getElementById('frag').innerText = `${data.current_frag}/${data.total_frags}`;
-                    for(let i=0; i<16; i++) document.getElementById('l' + i).classList.toggle('active', Math.random() > 0.3);
                 } else if(data.status === 'success') {
-                    clearInterval(interval);
-                    document.getElementById('status').innerText = t.statusDone;
+                    clearInterval(int);
+                    statusDiv.innerText = t.statusDone;
                     document.getElementById('bar').style.width = '100%';
                     document.getElementById('perc').innerText = '100.000%';
                     document.getElementById('downloadLink').href = '/api/files/' + data.file_name;
                     document.getElementById('downloadLink').style.display = 'block';
-                    document.getElementById('grid').style.display = 'none';
                     document.getElementById('mainBtn').disabled = false;
+                    document.getElementById('mainBtn').innerText = t.btnAgain;
                     step = 'start';
-                    updateUI();
                 }
             }, 1000);
         }
