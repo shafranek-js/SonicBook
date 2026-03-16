@@ -14,9 +14,16 @@
 
 ## 🛠️ Requirements
 
--   **Python 3.10+**
--   **FFmpeg** (installed and added to System PATH)
--   **Playwright** (browser engine for scraping)
+To run SonicBook correctly, you need the following system components and libraries:
+
+1.  **Python 3.10+**: The core language for the backend.
+2.  **FFmpeg**: Essential for parsing streams, splitting chapters, and converting audio. **Must be installed and added to your System PATH**.
+    *   *Windows*: Can be installed via Winget (`winget install -e --id Gyan.FFmpeg`).
+    *   *macOS*: `brew install ffmpeg`
+    *   *Linux*: `sudo apt install ffmpeg`
+3.  **Playwright (Chromium)**: A headless browser engine used for advanced scraping when direct HTML parsing fails.
+4.  **HTTP/2 Support (`httpx[http2]`)**: Required for high-speed scraping of specific sites without getting blocked.
+5.  **Aiofiles**: Used for efficient, non-blocking disk operations during downloads.
 
 ## 🚀 Quick Start
 
@@ -26,18 +33,22 @@
     cd SonicBook
     ```
 
-2.  **Install dependencies:**
+2.  **Install Python dependencies:**
     ```bash
     pip install -r requirements.txt
+    ```
+
+3.  **Install Playwright browser:**
+    ```bash
     playwright install chromium
     ```
 
-3.  **Run the application:**
+4.  **Run the application:**
     ```bash
     python main.py
     ```
 
-4.  Open your browser and navigate to `http://localhost:8000`.
+5.  Open your browser and navigate to `http://localhost:8000`.
 
 ## 📜 License
 

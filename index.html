@@ -29,6 +29,7 @@
         .stats { display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.8rem; font-family: monospace; }
         #downloadLink { display: none; margin-top: 20px; padding: 14px; background: var(--success); color: white; text-decoration: none; border-radius: 12px; font-weight: 600; text-align: center; }
         .merging-mode .bar-fill { animation: shimmer 2s infinite linear; background: linear-gradient(90deg, var(--primary) 25%, #fbbf24 50%, var(--primary) 75%); background-size: 200% 100%; }
+        .assembling-mode .bar-fill { animation: shimmer 2s infinite linear; background: linear-gradient(90deg, var(--success) 25%, #34d399 50%, var(--success) 75%); background-size: 200% 100%; }
         @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
     </style>
 </head>
@@ -124,8 +125,27 @@
 
 
         async function handleAction() {
-            if ((currentMode === 'm4b' || currentMode === 'zip') && step === 'start') await fetchInfo();
-            else await startDownload();
+            if (step === 'start') {
+                if (currentMode === 'm4b' || currentMode === 'zip') {
+                    await fetchInfo();
+                } else {
+                    await startDownload();
+                }
+            } else if (step === 'confirm') {
+                await startDownload();
+            } else if (step === 'done') {
+                resetForm();
+            }
+        }
+
+        function resetForm() {
+            document.getElementById('urlInput').value = '';
+            document.getElementById('pbox').style.display = 'none';
+            document.getElementById('downloadLink').style.display = 'none';
+            document.getElementById('status').style.display = 'none';
+            document.getElementById('optGroup').style.display = 'flex';
+            step = 'start';
+            updateUI();
         }
 
         async function fetchInfo() {
@@ -198,22 +218,30 @@
                 const data = await res.json();
                 const t = i18n[currentLang];
                 const statusDiv = document.getElementById('status');
+                
                 if(data.status === 'processing' || data.status === 'merging') {
                     statusDiv.innerText = data.status === 'merging' ? t.statusMerging : t.statusStreams;
                     if(data.status === 'merging') document.getElementById('pbox').classList.add('merging-mode');
+                    document.getElementById('pbox').classList.remove('assembling-mode');
                     document.getElementById('bar').style.width = data.percent + '%';
                     document.getElementById('perc').innerText = data.percent.toFixed(3) + '%';
                     document.getElementById('frag').innerText = `${data.current_frag}/${data.total_frags}`;
+                } else if(data.status === 'assembling') {
+                    statusDiv.innerText = currentLang === 'en' ? "⚙️ Assembling M4B... Please wait" : "⚙️ Сборка M4B... Пожалуйста, подождите";
+                    document.getElementById('pbox').classList.add('assembling-mode');
+                    document.getElementById('bar').style.width = '100%';
+                    document.getElementById('perc').innerText = '100.000%';
                 } else if(data.status === 'success') {
                     clearInterval(int);
                     statusDiv.innerText = t.statusDone;
+                    document.getElementById('pbox').classList.remove('assembling-mode');
                     document.getElementById('bar').style.width = '100%';
                     document.getElementById('perc').innerText = '100.000%';
                     document.getElementById('downloadLink').href = '/api/files/' + data.file_name;
                     document.getElementById('downloadLink').style.display = 'block';
                     document.getElementById('mainBtn').disabled = false;
                     document.getElementById('mainBtn').innerText = t.btnAgain;
-                    step = 'start';
+                    step = 'done';
                 }
             }, 1000);
         }

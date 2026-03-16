@@ -1,20 +1,17 @@
 import re
 import asyncio
 import json
+import logging
 import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 import config
 from processor import sanitize_filename
 
+logger = logging.getLogger(__name__)
+
 def log_debug(message):
-    import datetime
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        with open(config.DEBUG_LOG, "a", encoding="utf-8") as f:
-            f.write(f"[{ts}] {message}\n")
-    except: pass
-    print(f"DEBUG: {message}")
+    logger.info(message)
 
 def parse_time_to_seconds(value: str) -> int:
     try:

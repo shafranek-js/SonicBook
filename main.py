@@ -2,7 +2,10 @@ import os
 import uuid
 import time
 import asyncio
+import logging
+from contextlib import asynccontextmanager
 import uvicorn
+import aiofiles
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -11,7 +14,16 @@ import config
 import scraper
 import processor
 
-app = FastAPI(title="SonicBook")
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(config.DEBUG_LOG, encoding="utf-8"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # In-memory progress tracking
 # task_id -> {status, percent, current_frag, total_frags, file_name, timestamp}
@@ -42,20 +54,24 @@ async def cleanup_task():
                     fpath = os.path.join(config.DOWNLOADS_DIR, f)
                     if os.path.isfile(fpath) and now - os.path.getmtime(fpath) > config.FILE_EXPIRE_SECONDS:
                         try: os.remove(fpath)
-                        except: pass
+                        except Exception as e: logger.error(f"Failed to remove file {fpath}: {e}")
         except Exception as e:
-            print(f"Cleanup error: {e}")
+            logger.error(f"Cleanup error: {e}")
         
         await asyncio.sleep(600) # Run every 10 minutes
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(cleanup_task())
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(cleanup_task())
+    yield
+    task.cancel()
+
+app = FastAPI(title="SonicBook", lifespan=lifespan)
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    with open("index.html", "r", encoding="utf-8") as f:
-        return f.read()
+    async with aiofiles.open("index.html", "r", encoding="utf-8") as f:
+        return await f.read()
 
 @app.post("/api/info")
 async def get_info(request: InfoRequest):
@@ -88,7 +104,8 @@ async def process_book(task_id, url, mode):
     progress_store[task_id]["status"] = "processing"
     
     # Define callback for progress
-    async def update_progress(pct, curr, total):
+    async def update_progress(pct, curr, total, status=None):
+        if status is not None: progress_store[task_id]["status"] = status
         if pct is not None: progress_store[task_id]["percent"] = pct
         if curr is not None: progress_store[task_id]["current_frag"] = curr
         if total is not None: progress_store[task_id]["total_frags"] = total

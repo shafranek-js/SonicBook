@@ -4,17 +4,15 @@ import sys
 import re
 import zipfile
 import shutil
+import logging
+import aiofiles
 import httpx
 import config
 
+logger = logging.getLogger(__name__)
+
 def log_debug(message):
-    import datetime
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        with open(config.DEBUG_LOG, "a", encoding="utf-8") as f:
-            f.write(f"[{ts}] {message}\n")
-    except: pass
-    print(f"DEBUG: {message}")
+    logger.info(message)
 
 async def get_stream_duration(m3u8_url):
     try:
@@ -22,7 +20,9 @@ async def get_stream_duration(m3u8_url):
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout=15)
         return float(stdout.decode().strip())
-    except: return 0
+    except Exception as e:
+        log_debug(f"Failed to get stream duration: {e}")
+        return 0
 
 def sanitize_filename(name):
     import string
@@ -40,8 +40,8 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id):
         s, e = int(ch['start'] * 1000), int(ch['end'] * 1000)
         meta_content += f"\n[CHAPTER]\nTIMEBASE=1/1000\nSTART={s}\nEND={e}\ntitle={ch['title']}\n"
     
-    with open(meta_path, "w", encoding="utf-8") as f:
-        f.write(meta_content)
+    async with aiofiles.open(meta_path, "w", encoding="utf-8") as f:
+        await f.write(meta_content)
     
     # Нейтральное имя для сборки
     temp_m4b = os.path.join(config.DOWNLOADS_DIR, f"out_{task_id}.m4b")
@@ -114,9 +114,9 @@ async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
                 # Используем увеличенные таймауты
                 async with client.stream('GET', url, timeout=httpx.Timeout(30.0, read=120.0)) as response:
                     response.raise_for_status()
-                    with open(file_path, 'wb') as f:
+                    async with aiofiles.open(file_path, 'wb') as f:
                         async for chunk in response.aiter_bytes():
-                            f.write(chunk)
+                            await f.write(chunk)
                 downloaded += 1
                 percent = round((downloaded / total_files) * 95.0, 3)
                 await progress_callback(percent, downloaded, total_files)
@@ -143,10 +143,10 @@ async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
     
     # Создаем файл списка для ffmpeg concat
     list_file = os.path.join(temp_dir, "concat_list.txt")
-    with open(list_file, "w", encoding="utf-8") as f:
+    async with aiofiles.open(list_file, "w", encoding="utf-8") as f:
         for vf in valid_files:
             safe_path = vf.replace('\\', '/')
-            f.write(f"file '{safe_path}'\n")
+            await f.write(f"file '{safe_path}'\n")
             
     # Склеиваем всё в один файл
     merged_file = os.path.join(config.DOWNLOADS_DIR, f"merged_{task_id}.mp3")
@@ -170,64 +170,105 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
         if not source: return None
         source_ext = ".mp3"
     else:
-        # СТАНДАРТНАЯ ЗАГРУЗКА ЧЕРЕЗ YT-DLP
+        # СТАНДАРТНАЯ ЗАГРУЗКА ЧЕРЕЗ YT-DLP API
         temp_base = os.path.join(config.DOWNLOADS_DIR, f"dl_{task_id}")
-        total_dur = await get_stream_duration(m3u8_url)
         
+        # Получаем общее количество фрагментов, если это возможно, для fallback-расчетов
         total_frags = 0
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get(m3u8_url, timeout=10)
                 total_frags = len([l for l in r.text.splitlines() if l.strip() and not l.startswith('#')])
-        except: pass
-
-        command = [
-            sys.executable, "-m", "yt_dlp", m3u8_url, "-o", f"{temp_base}.%(ext)s",
-            "--concurrent-fragments", "16", "--ffmpeg-location", config.FFMPEG_PATH,
-            "--newline", "--no-colors"
-        ]
-        
-        try:
-            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-            buffer = ""
-            while True:
-                chunk = await process.stdout.read(1024)
-                if not chunk: break
-                buffer += chunk.decode(errors='replace')
-                while "\n" in buffer or "\r" in buffer:
-                    m = re.search(r"[\n\r]", buffer); line = buffer[:m.start()].strip(); buffer = buffer[m.end():]
-                    if not line: continue
-                    
-                    curr_frag = None
-                    percent = None
-                    
-                    fm = re.search(r"Got fragment\s*(\d+)", line, re.I)
-                    if fm:
-                        curr_frag = int(fm.group(1))
-                        if total_frags > 0: percent = round((curr_frag / total_frags) * 95.0, 3)
-                    
-                    tm = re.search(r"time=\s*(\d+:\d+:\d+[\.\d]*)", line, re.I)
-                    if tm and total_dur > 0:
-                        p = tm.group(1).split(':')
-                        curr_t = float(p[0]) * 3600 + float(p[1]) * 60 + float(p[2])
-                        percent = min(95.0, round((curr_t / total_dur) * 95.0, 3))
-                        if total_frags > 0: curr_frag = int(total_frags * (percent / 95))
-                    
-                    if percent is not None or curr_frag is not None:
-                        await progress_callback(percent, curr_frag, total_frags)
-
-            await process.wait()
-            
-            source = ""; source_ext = ""
-            for ext in ['.mp4', '.m4a', '.mp3']:
-                if os.path.exists(temp_base + ext): source = temp_base + ext; source_ext = ext; break
         except Exception as e:
-            log_debug(f"yt-dlp Process error: {e}")
+            log_debug(f"Failed to get total fragments: {e}")
+
+        # Запускаем синхронный yt-dlp в отдельном потоке (executor), чтобы не заблокировать сервер
+        current_loop = asyncio.get_running_loop()
+
+        # Создаем обертку для синхронного yt-dlp, чтобы не блокировать event loop
+        def download_with_ytdlp():
+            import yt_dlp
+            import time
+            
+            last_update_time = 0
+            
+            def progress_hook(d):
+                nonlocal last_update_time
+                
+                if d['status'] == 'downloading':
+                    now = time.time()
+                    # Обновляем не чаще 2 раз в секунду, чтобы не заспамить event loop
+                    if now - last_update_time < 0.5:
+                        return
+                    last_update_time = now
+                    
+                    percent = None
+                    curr_frag = None
+                    total = total_frags
+                    
+                    # Пытаемся получить прогресс по байтам (самый точный метод)
+                    total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                    if total_bytes > 0 and d.get('downloaded_bytes'):
+                        percent = round((d['downloaded_bytes'] / total_bytes) * 95.0, 3)
+                    
+                    # Fallback на парсинг строки процентов (убираем ~, ANSI-коды и прочий мусор)
+                    if percent is None and '_percent_str' in d:
+                        try:
+                            match = re.search(r'([0-9]+\.[0-9]+|[0-9]+)', d['_percent_str'])
+                            if match:
+                                percent = min(95.0, float(match.group(1)) * 0.95)
+                        except Exception as e:
+                            log_debug(f"Percent string parse error: {e}")
+
+                    # Количество фрагментов
+                    if 'fragment_index' in d and 'fragment_count' in d:
+                        curr_frag = d.get('fragment_index', 0)
+                        total = d.get('fragment_count', total_frags)
+                    
+                    # Отправляем прогресс обратно в асинхронный event loop
+                    if percent is not None or curr_frag is not None:
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                progress_callback(percent, curr_frag, total), 
+                                current_loop
+                            )
+                        except Exception as e:
+                            pass
+
+            ydl_opts = {
+                'outtmpl': f"{temp_base}.%(ext)s",
+                'concurrent_fragment_downloads': 16,
+                'ffmpeg_location': config.FFMPEG_PATH,
+                'quiet': True,
+                'no_warnings': True,
+                'progress_hooks': [progress_hook],
+            }
+            
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([m3u8_url])
+                return True
+            except Exception as e:
+                log_debug(f"yt-dlp Python API error: {e}")
+                return False
+
+        success = await current_loop.run_in_executor(None, download_with_ytdlp)
+        
+        if not success:
             return None
+            
+        source = ""; source_ext = ""
+        for ext in ['.mp4', '.m4a', '.mp3']:
+            if os.path.exists(temp_base + ext): 
+                source = temp_base + ext
+                source_ext = ext
+                break
 
     # ФИНАЛЬНАЯ СБОРКА И НАРЕЗКА (ОБЩАЯ ДЛЯ ОБОИХ МЕТОДОВ)
     try:
         if source:
+            await progress_callback(100.0, total_frags, total_frags, status="assembling")
+            
             final_file = ""
             if mode == "zip" and chapters:
                 final_file = await split_to_chapters(source, chapters, title_base, task_id, source_ext)
