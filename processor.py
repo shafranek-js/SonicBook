@@ -99,59 +99,134 @@ async def split_to_chapters(source_file, chapters, title_base, task_id, source_e
     shutil.rmtree(temp_dir)
     return zip_name
 
-async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progress_callback):
-    # Используем нейтральное имя для временного скачивания
-    temp_base = os.path.join(config.DOWNLOADS_DIR, f"dl_{task_id}")
-    total_dur = await get_stream_duration(m3u8_url)
+async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
+    """Кастомный параллельный загрузчик для прямых MP3 ссылок с защитой от обрывов"""
+    os.makedirs(temp_dir, exist_ok=True)
+    total_files = len(urls)
+    downloaded = 0
     
-    total_frags = 0
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(m3u8_url, timeout=10)
-            total_frags = len([l for l in r.text.splitlines() if l.strip() and not l.startswith('#')])
-    except: pass
+    async def download_file(client, url, index, retries=3):
+        nonlocal downloaded
+        file_path = os.path.join(temp_dir, f"{index:04d}.mp3")
+        
+        for attempt in range(retries):
+            try:
+                # Используем увеличенные таймауты
+                async with client.stream('GET', url, timeout=httpx.Timeout(30.0, read=120.0)) as response:
+                    response.raise_for_status()
+                    with open(file_path, 'wb') as f:
+                        async for chunk in response.aiter_bytes():
+                            f.write(chunk)
+                downloaded += 1
+                percent = round((downloaded / total_files) * 95.0, 3)
+                await progress_callback(percent, downloaded, total_files)
+                return file_path
+            except Exception as e:
+                log_debug(f"Chunk {index} failed (attempt {attempt+1}/{retries}): {e}")
+                await asyncio.sleep(2) # Пауза перед новой попыткой
+        
+        log_debug(f"Failed to download {url} after {retries} attempts.")
+        return None
 
-    command = [
-        sys.executable, "-m", "yt_dlp", m3u8_url, "-o", f"{temp_base}.%(ext)s",
-        "--concurrent-fragments", "16", "--ffmpeg-location", config.FFMPEG_PATH,
-        "--newline", "--no-colors"
+    # Скачиваем в 4 потока, чтобы не перегружать сервер и избежать обрывов (peer closed connection)
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=4), http2=True) as client:
+        tasks = [download_file(client, url, i) for i, url in enumerate(urls)]
+        results = await asyncio.gather(*tasks)
+    
+    # Отфильтруем неудачные
+    valid_files = [f for f in results if f]
+    
+    # Если скачалось меньше половины - считаем загрузку неудачной
+    if len(valid_files) < len(urls) * 0.5:
+        log_debug("Too many failed chunks, aborting merge.")
+        return None
+    
+    # Создаем файл списка для ffmpeg concat
+    list_file = os.path.join(temp_dir, "concat_list.txt")
+    with open(list_file, "w", encoding="utf-8") as f:
+        for vf in valid_files:
+            safe_path = vf.replace('\\', '/')
+            f.write(f"file '{safe_path}'\n")
+            
+    # Склеиваем всё в один файл
+    merged_file = os.path.join(config.DOWNLOADS_DIR, f"merged_{task_id}.mp3")
+    cmd = [
+        config.FFMPEG_PATH, "-y", "-f", "concat", "-safe", "0",
+        "-i", list_file, "-c", "copy", merged_file
     ]
+    p = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    await p.wait()
     
-    try:
-        process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-        buffer = ""
-        while True:
-            chunk = await process.stdout.read(1024)
-            if not chunk: break
-            buffer += chunk.decode(errors='replace')
-            while "\n" in buffer or "\r" in buffer:
-                m = re.search(r"[\n\r]", buffer); line = buffer[:m.start()].strip(); buffer = buffer[m.end():]
-                if not line: continue
-                
-                curr_frag = None
-                percent = None
-                
-                fm = re.search(r"Got fragment\s*(\d+)", line, re.I)
-                if fm:
-                    curr_frag = int(fm.group(1))
-                    if total_frags > 0: percent = round((curr_frag / total_frags) * 95.0, 3)
-                
-                tm = re.search(r"time=\s*(\d+:\d+:\d+[\.\d]*)", line, re.I)
-                if tm and total_dur > 0:
-                    p = tm.group(1).split(':')
-                    curr_t = float(p[0]) * 3600 + float(p[1]) * 60 + float(p[2])
-                    percent = min(95.0, round((curr_t / total_dur) * 95.0, 3))
-                    if total_frags > 0: curr_frag = int(total_frags * (percent / 95))
-                
-                if percent is not None or curr_frag is not None:
-                    await progress_callback(percent, curr_frag, total_frags)
+    # Убираем мусор
+    shutil.rmtree(temp_dir)
+    return merged_file
 
-        await process.wait()
+async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progress_callback):
+    # ПРОВЕРКА НА ПРЯМЫЕ ССЫЛКИ
+    if m3u8_url.startswith("DIRECT_URLS:"):
+        urls = m3u8_url.replace("DIRECT_URLS:", "").split(",")
+        temp_dir = os.path.join(config.DOWNLOADS_DIR, f"dl_dir_{task_id}")
+        source = await download_direct_urls(urls, temp_dir, task_id, progress_callback)
+        if not source: return None
+        source_ext = ".mp3"
+    else:
+        # СТАНДАРТНАЯ ЗАГРУЗКА ЧЕРЕЗ YT-DLP
+        temp_base = os.path.join(config.DOWNLOADS_DIR, f"dl_{task_id}")
+        total_dur = await get_stream_duration(m3u8_url)
         
-        source = ""; source_ext = ""
-        for ext in ['.mp4', '.m4a', '.mp3']:
-            if os.path.exists(temp_base + ext): source = temp_base + ext; source_ext = ext; break
+        total_frags = 0
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(m3u8_url, timeout=10)
+                total_frags = len([l for l in r.text.splitlines() if l.strip() and not l.startswith('#')])
+        except: pass
+
+        command = [
+            sys.executable, "-m", "yt_dlp", m3u8_url, "-o", f"{temp_base}.%(ext)s",
+            "--concurrent-fragments", "16", "--ffmpeg-location", config.FFMPEG_PATH,
+            "--newline", "--no-colors"
+        ]
         
+        try:
+            process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            buffer = ""
+            while True:
+                chunk = await process.stdout.read(1024)
+                if not chunk: break
+                buffer += chunk.decode(errors='replace')
+                while "\n" in buffer or "\r" in buffer:
+                    m = re.search(r"[\n\r]", buffer); line = buffer[:m.start()].strip(); buffer = buffer[m.end():]
+                    if not line: continue
+                    
+                    curr_frag = None
+                    percent = None
+                    
+                    fm = re.search(r"Got fragment\s*(\d+)", line, re.I)
+                    if fm:
+                        curr_frag = int(fm.group(1))
+                        if total_frags > 0: percent = round((curr_frag / total_frags) * 95.0, 3)
+                    
+                    tm = re.search(r"time=\s*(\d+:\d+:\d+[\.\d]*)", line, re.I)
+                    if tm and total_dur > 0:
+                        p = tm.group(1).split(':')
+                        curr_t = float(p[0]) * 3600 + float(p[1]) * 60 + float(p[2])
+                        percent = min(95.0, round((curr_t / total_dur) * 95.0, 3))
+                        if total_frags > 0: curr_frag = int(total_frags * (percent / 95))
+                    
+                    if percent is not None or curr_frag is not None:
+                        await progress_callback(percent, curr_frag, total_frags)
+
+            await process.wait()
+            
+            source = ""; source_ext = ""
+            for ext in ['.mp4', '.m4a', '.mp3']:
+                if os.path.exists(temp_base + ext): source = temp_base + ext; source_ext = ext; break
+        except Exception as e:
+            log_debug(f"yt-dlp Process error: {e}")
+            return None
+
+    # ФИНАЛЬНАЯ СБОРКА И НАРЕЗКА (ОБЩАЯ ДЛЯ ОБОИХ МЕТОДОВ)
+    try:
         if source:
             final_file = ""
             if mode == "zip" and chapters:
@@ -168,5 +243,5 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
             return final_file
         return None
     except Exception as e:
-        log_debug(f"Process error: {e}")
+        log_debug(f"Final assembly error: {e}")
         return None

@@ -1,9 +1,11 @@
 import re
 import asyncio
+import json
 import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 import config
+from processor import sanitize_filename
 
 def log_debug(message):
     import datetime
@@ -79,7 +81,45 @@ async def get_book_info(book_url):
     log_debug(f"Combined info scraping: {book_url}")
     res = {"m3u8": None, "title": "audiobook", "chapters": []}
     
-    # Text-based parsing (Fast)
+    # 0. МАРШРУТИЗАТОР: Обработка специфичных сайтов (например, knigavuhe.org)
+    if "knigavuhe.org" in book_url:
+        log_debug("Detected knigavuhe.org, using dedicated fast parser...")
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            async with httpx.AsyncClient(http2=True) as client:
+                resp = await client.get(book_url, headers=headers, timeout=20, follow_redirects=True)
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    h1 = soup.find("h1")
+                    if h1: res["title"] = sanitize_filename(h1.get_text().strip())
+                    
+                    # Ищем JSON со списком треков
+                    match = re.search(r'\[\{.*?"title".*?"url".*?\}\]', resp.text)
+                    if match:
+                        data = json.loads(match.group(0))
+                        direct_urls = []
+                        current_start = 0
+                        for item in data:
+                            title = item.get("title", "")
+                            url = item.get("url", "")
+                            dur = item.get("duration", 0)
+                            if url:
+                                direct_urls.append(url)
+                                res["chapters"].append({
+                                    "title": title,
+                                    "start": current_start,
+                                    "end": current_start + dur
+                                })
+                                current_start += dur
+                        log_debug(f"Knigavuhe: Found {len(direct_urls)} tracks")
+                        # Передаем список URL как строку, разделенную запятыми, с префиксом
+                        res["m3u8"] = "DIRECT_URLS:" + ",".join(direct_urls)
+                        return res["m3u8"], res["title"], res["chapters"]
+        except Exception as e:
+            log_debug(f"Knigavuhe parse error: {e}")
+            return None, "audiobook", []
+
+    # Text-based parsing (Fast) для остальных сайтов
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
