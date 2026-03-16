@@ -50,6 +50,10 @@ To run SonicBook correctly, you need the following system components and librari
 
 5.  Open your browser and navigate to `http://localhost:8000`.
 
+## 🏗️ Architecture & Development
+
+For a detailed breakdown of the application architecture, exact dependencies, the current state of the codebase, and technical debt, please refer to the [Handoff Document](handoff.md).
+
 ## 📜 License
 
 MIT License. Free for personal use.
