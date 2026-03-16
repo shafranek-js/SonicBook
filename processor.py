@@ -281,6 +281,22 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                 os.rename(source, dest)
             
             if os.path.exists(source): os.remove(source)
+
+            # Generate JSON metadata for the integrated web player
+            try:
+                import json
+                meta_json_path = os.path.join(config.DOWNLOADS_DIR, f"{title_base}.json")
+                meta_data = {
+                    "title": title_base,
+                    "mode": mode,
+                    "file_name": final_file,
+                    "chapters": chapters
+                }
+                async with aiofiles.open(meta_json_path, "w", encoding="utf-8") as f:
+                    await f.write(json.dumps(meta_data, ensure_ascii=False, indent=2))
+            except Exception as meta_e:
+                log_debug(f"Failed to write metadata JSON: {meta_e}")
+
             return final_file
         return None
     except Exception as e:
