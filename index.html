@@ -9,6 +9,13 @@
         body.light-theme { --bg: #F3F4F6; --card: #FFFFFF; --text: #1F2937; --muted: #6B7280; --border: #E5E7EB; }
         * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.3s, color 0.3s; }
         body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        
+        /* Custom Scrollbar Styling */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--primary); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+        * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
         .container { background: var(--card); padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; max-width: 550px; text-align: center; position: relative; }
         .controls { position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; }
         .btn-icon { background: none; border: 1px solid var(--border); color: var(--muted); width: 40px; height: 40px; border-radius: 10px; cursor: pointer; display: flex; justify-content: center; align-items: center; }
@@ -50,12 +57,9 @@
         .player-time { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--muted); font-family: monospace; }
         audio { display: none; }
 
-        /* Library Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 100; justify-content: center; align-items: center; padding: 20px; }
-        .modal-content { background: var(--card); border-radius: 20px; width: 100%; max-width: 600px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 20px 40px rgba(0,0,0,0.4); border: 1px solid var(--border); overflow: hidden; }
-        .modal-header { padding: 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        .modal-title { font-size: 1.2rem; font-weight: bold; }
-        .close-btn { background: none; border: none; color: var(--muted); font-size: 1.5rem; cursor: pointer; }
+        /* Library Panel Styles (Slides from Left) */
+        .library-panel { position: absolute; top: 0; left: 20px; width: 350px; height: 100%; background: var(--card); border-radius: 20px 0 0 20px; border: 1px solid var(--border); border-right: none; box-shadow: -10px 10px 25px rgba(0,0,0,0.2); z-index: 1; transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s; opacity: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: none; }
+        .container.library-open .library-panel { transform: translateX(-330px); opacity: 1; pointer-events: auto; }
         .library-list { overflow-y: auto; padding: 10px; flex: 1; }
         .library-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.2s; }
         .library-item:hover { background: rgba(0,0,0,0.05); }
@@ -64,7 +68,7 @@
         .library-item-meta { font-size: 0.75rem; color: var(--muted); }
         .library-item-play { color: var(--primary); font-size: 1.2rem; padding-left: 15px; }
         .empty-lib { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 0.9rem; }
-        
+
         /* Chapters List Styling inside Modal/Panel */
         .chapter-list-item { position: relative; font-size: 0.85rem; padding: 12px 15px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.2s; display: flex; justify-content: space-between; overflow: hidden; }
         .chapter-list-item:hover { background: rgba(0,0,0,0.05); }
@@ -74,10 +78,11 @@
         .chapter-content { position: relative; z-index: 1; display: flex; justify-content: space-between; width: 100%; pointer-events: none; }
 
         /* Chapters Side Panel */
-        .container { position: relative; display: flex; max-width: 550px; margin: 0 auto; transition: max-width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
-        .container.panel-open { max-width: 900px; }
+        .container { position: relative; display: flex; max-width: 550px; margin: 0 auto; transition: max-width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); align-items: stretch; }
+        .container.panel-open, .container.library-open { max-width: 900px; }
+        .container.panel-open.library-open { max-width: 1250px; }
         
-        .main-card { background: var(--card); padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; text-align: center; position: relative; z-index: 2; flex-shrink: 0; min-width: 300px;}
+        .main-card { background: var(--card); padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; text-align: center; position: relative; z-index: 2; flex-shrink: 0; min-width: 300px; display: flex; flex-direction: column; }
         
         .chapters-panel { position: absolute; top: 0; right: 20px; width: 350px; height: 100%; background: var(--card); border-radius: 0 20px 20px 0; border: 1px solid var(--border); border-left: none; box-shadow: 10px 10px 25px rgba(0,0,0,0.2); z-index: 1; transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s; opacity: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: none; }
         .container.panel-open .chapters-panel { transform: translateX(330px); opacity: 1; pointer-events: auto; }
@@ -86,31 +91,29 @@
         .panel-content { overflow-y: auto; flex: 1; }
 
         @media (max-width: 950px) {
-            .container.panel-open { max-width: 550px; }
-            .chapters-panel { right: 0; border-radius: 20px; border-left: 1px solid var(--border); z-index: 10; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
-            .container.panel-open .chapters-panel { transform: translateX(0); }
+            .container.panel-open, .container.library-open, .container.panel-open.library-open { max-width: 550px; }
+            .chapters-panel, .library-panel { left: 0; right: 0; width: 100%; border-radius: 20px; border: 1px solid var(--border); z-index: 10; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+            .container.panel-open .chapters-panel, .container.library-open .library-panel { transform: translateX(0); }
         }
     </style>
 </head>
 <body>
-    <!-- Library Modal -->
-    <div class="modal-overlay" id="libraryModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div class="modal-title" id="t-lib-title">My Library</div>
+    <div class="container" id="appContainer">
+        <!-- Library Panel (Slides from Left) -->
+        <div class="library-panel" id="libraryPanel">
+            <div class="panel-header">
+                <div id="t-lib-title">My Library</div>
                 <button class="close-btn" onclick="toggleLibrary()">×</button>
             </div>
             <div class="library-list" id="libraryList">
                 <div class="empty-lib">Loading...</div>
             </div>
         </div>
-    </div>
 
-    <div class="container" id="appContainer">
         <!-- Main Card -->
         <div class="main-card">
             <div class="controls">
-                <button class="btn-icon" onclick="toggleLibrary()" title="Library">📚</button>
+                <button class="btn-icon" id="libBtn" onclick="toggleLibrary()" title="Library">📚</button>
                 <button class="btn-icon" onclick="toggleLang()" id="langBtn">RU</button>
                 <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
             </div>
@@ -128,7 +131,7 @@
             <div style="font-size: 0.8rem; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px;">
                 <span style="color: var(--muted);" id="t-save-path">Save to:</span>
                 <span id="currentPath" style="font-family: monospace; background: rgba(0,0,0,0.1); padding: 4px 8px; border-radius: 6px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
-                <button onclick="chooseFolder()" style="background: none; border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Change</button>
+                <button onclick="chooseFolder()" id="btn-change-folder" style="background: none; border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Change</button>
             </div>
 
             <div id="chaptersBox" class="chapters-box">
@@ -139,7 +142,7 @@
             <div id="status" style="margin-bottom: 10px; font-size: 0.85rem; display: none;"></div>
 
             <button id="mainBtn" onclick="handleAction()">Start Download</button>
-            
+
             <div class="progress-box" id="pbox">
                 <div class="bar-bg"><div class="bar-fill" id="bar"></div></div>
                 <div class="stats">
@@ -153,16 +156,16 @@
             <div class="player-box" id="playerBox">
                 <div class="player-header">
                     <div class="player-title" id="playerTitle">Book Title</div>
-                    <button class="player-chapter-btn" onclick="toggleChaptersModal()">📑 Chapters</button>
+                    <button class="player-chapter-btn" id="btn-player-chapters" onclick="toggleChaptersModal()">📑 Chapters</button>
                 </div>
                 <div class="player-chapter" id="playerChapter">Chapter 1</div>
-                
+
                 <div class="player-controls">
                     <button class="p-btn p-btn-small" onclick="seekRelative(-15)">⏪</button>
                     <button class="p-btn" id="playBtn" onclick="togglePlay()">▶</button>
                     <button class="p-btn p-btn-small" onclick="seekRelative(15)">⏩</button>
                 </div>
-                
+
                 <div class="timeline-container" id="timeline" onclick="seek(event)">
                     <div class="timeline-fill" id="timelineFill"></div>
                     <div id="markersContainer"></div>
@@ -173,19 +176,18 @@
                 </div>
                 <audio id="audioElement"></audio>
             </div>
-        </div>
-        
-        <!-- Chapters Panel (Slides from Right of Main Card) -->
-        <div class="chapters-panel" id="chaptersPanel">
+            </div>
+
+            <!-- Chapters Panel (Slides from Right of Main Card) -->
+            <div class="chapters-panel" id="chaptersPanel">
             <div class="panel-header">
-                <div>Table of Contents</div>
+                <div id="t-panel-title">Table of Contents</div>
                 <button class="close-btn" onclick="toggleChaptersModal()">×</button>
             </div>
             <div class="panel-content" id="playerChaptersList">
-                <div class="empty-lib">No chapters available.</div>
+                <div class="empty-lib" id="t-no-chapters">No chapters available.</div>
             </div>
-        </div>
-
+            </div>
     </div>
 
     <script>
@@ -195,14 +197,22 @@
                 btnStart: "Start Download", btnFetch: "Fetch Info", btnConfirm: "Confirm & Download", btnAgain: "Download Another",
                 statusInit: "Initializing...", statusStreams: "Downloading...", statusMerging: "Finalizing & Metadata...",
                 statusDone: "Ready!", found: "Chapters found:", noChapters: "No chapters found. Will download as single file.", saveBtn: "📥 Save Result",
-                modeSingle: "Single File"
+                modeSingle: "Single File", modeM4B: "M4B (Chapters)", modeZIP: "ZIP (Split)",
+                saveTo: "Save to:", changeBtn: "Change", libTitle: "My Library", libEmpty: "Your library is empty.",
+                tocTitle: "Table of Contents", noChaptersInPanel: "No chapters available for this book.",
+                loadingDialog: "Loading dialog...", assemblingStatus: "⚙️ Assembling M4B... Please wait",
+                libTooltip: "Library", themeTooltip: "Theme", langTooltip: "Language"
             },
             ru: {
                 subtitle: "Продвинутый загрузчик аудиокниг", placeholder: "Вставьте ссылку...",
                 btnStart: "Начать загрузку", btnFetch: "Найти главы", btnConfirm: "Подтвердить и скачать", btnAgain: "Загрузить еще одну",
                 statusInit: "Инициализация...", statusStreams: "Загрузка...", statusMerging: "Сборка и метаданные...",
                 statusDone: "Готово!", found: "Найденные главы:", noChapters: "Главы не найдены. Будет скачано одним файлом.", saveBtn: "📥 Сохранить результат",
-                modeSingle: "Одним файлом"
+                modeSingle: "Одним файлом", modeM4B: "M4B (Главы)", modeZIP: "ZIP (Нарезка)",
+                saveTo: "Сохранять в:", changeBtn: "Изменить", libTitle: "Моя Библиотека", libEmpty: "Библиотека пуста.",
+                tocTitle: "Оглавление", noChaptersInPanel: "Для этой книги нет списка глав.",
+                loadingDialog: "Открытие окна...", assemblingStatus: "⚙️ Сборка M4B... Пожалуйста, подождите",
+                libTooltip: "Библиотека", themeTooltip: "Тема", langTooltip: "Язык"
             }
         };
 
@@ -221,12 +231,26 @@
             document.getElementById('t-subtitle').innerText = t.subtitle;
             document.getElementById('urlInput').placeholder = t.placeholder;
             document.getElementById('downloadLink').innerText = t.saveBtn;
+            document.getElementById('mode-m4b').innerText = t.modeM4B;
             document.getElementById('mode-mp3').innerText = t.modeSingle;
+            document.getElementById('mode-zip').innerText = t.modeZIP;
             document.getElementById('langBtn').innerText = currentLang === 'en' ? 'RU' : 'EN';
             document.getElementById('t-found').innerText = t.found;
+            document.getElementById('t-save-path').innerText = t.saveTo;
+            document.getElementById('btn-change-folder').innerText = t.changeBtn;
+            document.getElementById('t-lib-title').innerText = t.libTitle;
+            document.getElementById('t-panel-title').innerText = t.tocTitle;
+            document.getElementById('btn-player-chapters').innerText = '📑 ' + (currentLang === 'en' ? 'Chapters' : 'Главы');
+            
+            // Tooltips
+            document.querySelector('[title="Library"]').title = t.libTooltip;
+            document.getElementById('themeBtn').title = t.themeTooltip;
+            document.getElementById('langBtn').title = t.langTooltip;
+
             const btn = document.getElementById('mainBtn');
             if (step === 'start') btn.innerText = (currentMode === 'm4b' || currentMode === 'zip') ? t.btnFetch : t.btnStart;
             else if (step === 'confirm') btn.innerText = t.btnConfirm;
+            else if (step === 'done') btn.innerText = t.btnAgain;
         }
 
         function toggleLang() { currentLang = currentLang === 'en' ? 'ru' : 'en'; localStorage.setItem('lang', currentLang); updateUI(); }
@@ -294,24 +318,25 @@
 
         // Library Logic
         function toggleLibrary() {
-            const modal = document.getElementById('libraryModal');
-            if (modal.style.display === 'flex') {
-                modal.style.display = 'none';
+            const container = document.getElementById('appContainer');
+            if (container.classList.contains('library-open')) {
+                container.classList.remove('library-open');
             } else {
-                modal.style.display = 'flex';
+                container.classList.add('library-open');
                 loadLibrary();
             }
         }
 
         async function loadLibrary() {
             const listDiv = document.getElementById('libraryList');
-            listDiv.innerHTML = '<div class="empty-lib">Loading...</div>';
+            const t = i18n[currentLang];
+            listDiv.innerHTML = `<div class="empty-lib">${t.statusInit}</div>`;
             try {
                 const res = await fetch('/api/library');
                 const data = await res.json();
                 
                 if (data.files.length === 0) {
-                    listDiv.innerHTML = '<div class="empty-lib">Your library is empty.</div>';
+                    listDiv.innerHTML = `<div class="empty-lib">${t.libEmpty}</div>`;
                     return;
                 }
 
@@ -321,7 +346,7 @@
                         <div class="library-item" onclick="playFromLibrary('${f.name}')">
                             <div class="library-item-info">
                                 <div class="library-item-title">${f.name}</div>
-                                <div class="library-item-meta">${f.size_mb} MB • ${date} ${f.has_meta ? '• 📑 Chapters' : ''}</div>
+                                <div class="library-item-meta">${f.size_mb} MB • ${date} ${f.has_meta ? '• 📑' : ''}</div>
                             </div>
                             <div class="library-item-play">▶</div>
                         </div>
@@ -333,7 +358,7 @@
         }
 
         function playFromLibrary(fileName) {
-            toggleLibrary(); // Close modal
+            document.getElementById('appContainer').classList.remove('library-open');
             resetForm(); // Hide download UI
             step = 'done'; // Set state to done so "Download Another" works correctly
             document.getElementById('mainBtn').innerText = i18n[currentLang].btnAgain;
@@ -549,10 +574,11 @@
 
         function renderPlayerChapters() {
             const listDiv = document.getElementById('playerChaptersList');
+            const t = i18n[currentLang];
             
             if (playerState.mode === 'zip') {
                 if (!playerState.playlist || playerState.playlist.length === 0) {
-                    listDiv.innerHTML = '<div class="empty-lib">No tracks available.</div>';
+                    listDiv.innerHTML = `<div class="empty-lib">${t.noChaptersInPanel}</div>`;
                     return;
                 }
                 listDiv.innerHTML = playerState.playlist.map((track, idx) => {
@@ -565,7 +591,7 @@
                 }).join('');
             } else {
                 if (!playerState.chapters || playerState.chapters.length === 0) {
-                    listDiv.innerHTML = '<div class="empty-lib">No chapters available for this book.</div>';
+                    listDiv.innerHTML = `<div class="empty-lib">${t.noChaptersInPanel}</div>`;
                     return;
                 }
                 
@@ -750,7 +776,7 @@
                     document.getElementById('perc').innerText = data.percent.toFixed(3) + '%';
                     document.getElementById('frag').innerText = `${data.current_frag}/${data.total_frags}`;
                 } else if(data.status === 'assembling') {
-                    statusDiv.innerText = currentLang === 'en' ? "⚙️ Assembling M4B... Please wait" : "⚙️ Сборка M4B... Пожалуйста, подождите";
+                    statusDiv.innerText = t.assemblingStatus;
                     document.getElementById('pbox').classList.add('assembling-mode');
                     document.getElementById('bar').style.width = '100%';
                     document.getElementById('perc').innerText = '100.000%';
