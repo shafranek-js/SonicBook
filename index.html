@@ -65,10 +65,31 @@
         .library-item-play { color: var(--primary); font-size: 1.2rem; padding-left: 15px; }
         .empty-lib { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 0.9rem; }
         
-        /* Chapters List Styling inside Modal */
-        .chapter-list-item { font-size: 0.85rem; padding: 12px 15px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.2s; display: flex; justify-content: space-between; }
+        /* Chapters List Styling inside Modal/Panel */
+        .chapter-list-item { position: relative; font-size: 0.85rem; padding: 12px 15px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.2s; display: flex; justify-content: space-between; overflow: hidden; }
         .chapter-list-item:hover { background: rgba(0,0,0,0.05); }
-        .chapter-list-item.active-ch { background: rgba(99, 102, 241, 0.1); border-left: 4px solid var(--primary); padding-left: 11px; font-weight: 600; color: var(--primary); }
+        .chapter-list-item.active-ch { font-weight: 600; color: var(--primary); }
+        .chapter-bg-fill { position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: var(--primary); opacity: 0.15; z-index: 0; transition: width 0.1s linear; }
+        .chapter-list-item.active-ch .chapter-bg-fill { opacity: 0.25; }
+        .chapter-content { position: relative; z-index: 1; display: flex; justify-content: space-between; width: 100%; pointer-events: none; }
+
+        /* Chapters Side Panel */
+        .container { position: relative; display: flex; max-width: 550px; margin: 0 auto; transition: max-width 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        .container.panel-open { max-width: 900px; }
+        
+        .main-card { background: var(--card); padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; text-align: center; position: relative; z-index: 2; flex-shrink: 0; min-width: 300px;}
+        
+        .chapters-panel { position: absolute; top: 0; right: 20px; width: 350px; height: 100%; background: var(--card); border-radius: 0 20px 20px 0; border: 1px solid var(--border); border-left: none; box-shadow: 10px 10px 25px rgba(0,0,0,0.2); z-index: 1; transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s; opacity: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: none; }
+        .container.panel-open .chapters-panel { transform: translateX(330px); opacity: 1; pointer-events: auto; }
+        
+        .panel-header { padding: 20px; border-bottom: 1px solid var(--border); font-weight: bold; font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; }
+        .panel-content { overflow-y: auto; flex: 1; }
+
+        @media (max-width: 950px) {
+            .container.panel-open { max-width: 550px; }
+            .chapters-panel { right: 0; border-radius: 20px; border-left: 1px solid var(--border); z-index: 10; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+            .container.panel-open .chapters-panel { transform: translateX(0); }
+        }
     </style>
 </head>
 <body>
@@ -85,83 +106,84 @@
         </div>
     </div>
 
-    <!-- Chapters Modal -->
-    <div class="modal-overlay" id="chaptersModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div class="modal-title">Table of Contents</div>
+    <div class="container" id="appContainer">
+        <!-- Main Card -->
+        <div class="main-card">
+            <div class="controls">
+                <button class="btn-icon" onclick="toggleLibrary()" title="Library">📚</button>
+                <button class="btn-icon" onclick="toggleLang()" id="langBtn">RU</button>
+                <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
+            </div>
+            <h1 id="t-title">SonicBook</h1>
+            <p id="t-subtitle" style="color: var(--muted); margin-bottom: 20px; font-size: 0.9rem;">Advanced Audiobook Downloader</p>
+            
+            <input type="text" id="urlInput" placeholder="Paste link here...">
+            
+            <div class="options-group" id="optGroup">
+                <button class="opt-btn active" id="mode-m4b" onclick="setMode('m4b')">M4B (Chapters)</button>
+                <button class="opt-btn" id="mode-mp3" onclick="setMode('mp3')">Single File</button>
+                <button class="opt-btn" id="mode-zip" onclick="setMode('zip')">ZIP (Split)</button>
+            </div>
+
+            <div style="font-size: 0.8rem; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <span style="color: var(--muted);" id="t-save-path">Save to:</span>
+                <span id="currentPath" style="font-family: monospace; background: rgba(0,0,0,0.1); padding: 4px 8px; border-radius: 6px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
+                <button onclick="chooseFolder()" style="background: none; border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Change</button>
+            </div>
+
+            <div id="chaptersBox" class="chapters-box">
+                <div style="font-weight: 600; margin-bottom: 10px; font-size: 0.85rem;" id="t-found">Chapters found:</div>
+                <div id="chaptersList"></div>
+            </div>
+
+            <div id="status" style="margin-bottom: 10px; font-size: 0.85rem; display: none;"></div>
+
+            <button id="mainBtn" onclick="handleAction()">Start Download</button>
+            
+            <div class="progress-box" id="pbox">
+                <div class="bar-bg"><div class="bar-fill" id="bar"></div></div>
+                <div class="stats">
+                    <span id="perc">0.000%</span>
+                    <span id="frag">0/0</span>
+                </div>
+            </div>
+            <a id="downloadLink" href="#" target="_blank">📥 Save Result</a>
+
+            <!-- Player UI -->
+            <div class="player-box" id="playerBox">
+                <div class="player-header">
+                    <div class="player-title" id="playerTitle">Book Title</div>
+                    <button class="player-chapter-btn" onclick="toggleChaptersModal()">📑 Chapters</button>
+                </div>
+                <div class="player-chapter" id="playerChapter">Chapter 1</div>
+                
+                <div class="player-controls">
+                    <button class="p-btn p-btn-small" onclick="seekRelative(-15)">⏪</button>
+                    <button class="p-btn" id="playBtn" onclick="togglePlay()">▶</button>
+                    <button class="p-btn p-btn-small" onclick="seekRelative(15)">⏩</button>
+                </div>
+                
+                <div class="timeline-container" id="timeline" onclick="seek(event)">
+                    <div class="timeline-fill" id="timelineFill"></div>
+                    <div id="markersContainer"></div>
+                </div>
+                <div class="player-time">
+                    <span id="timeCurrent">00:00:00</span>
+                    <span id="timeTotal">00:00:00</span>
+                </div>
+                <audio id="audioElement"></audio>
+            </div>
+        </div>
+        
+        <!-- Chapters Panel (Slides from Right of Main Card) -->
+        <div class="chapters-panel" id="chaptersPanel">
+            <div class="panel-header">
+                <div>Table of Contents</div>
                 <button class="close-btn" onclick="toggleChaptersModal()">×</button>
             </div>
-            <div class="library-list" id="playerChaptersList">
+            <div class="panel-content" id="playerChaptersList">
                 <div class="empty-lib">No chapters available.</div>
             </div>
-        </div>
-    </div>
-
-    <div class="container">
-        <div class="controls">
-            <button class="btn-icon" onclick="toggleLibrary()" title="Library">📚</button>
-            <button class="btn-icon" onclick="toggleLang()" id="langBtn">RU</button>
-            <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
-        </div>
-        <h1 id="t-title">SonicBook</h1>
-        <p id="t-subtitle" style="color: var(--muted); margin-bottom: 20px; font-size: 0.9rem;">Advanced Audiobook Downloader</p>
-        
-        <input type="text" id="urlInput" placeholder="Paste link here...">
-        
-        <div class="options-group" id="optGroup">
-            <button class="opt-btn active" id="mode-m4b" onclick="setMode('m4b')">M4B (Chapters)</button>
-            <button class="opt-btn" id="mode-mp3" onclick="setMode('mp3')">Single File</button>
-            <button class="opt-btn" id="mode-zip" onclick="setMode('zip')">ZIP (Split)</button>
-        </div>
-
-        <div style="font-size: 0.8rem; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <span style="color: var(--muted);" id="t-save-path">Save to:</span>
-            <span id="currentPath" style="font-family: monospace; background: rgba(0,0,0,0.1); padding: 4px 8px; border-radius: 6px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
-            <button onclick="chooseFolder()" style="background: none; border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Change</button>
-        </div>
-
-        <div id="chaptersBox" class="chapters-box">
-            <div style="font-weight: 600; margin-bottom: 10px; font-size: 0.85rem;" id="t-found">Chapters found:</div>
-            <div id="chaptersList"></div>
-        </div>
-
-        <div id="status" style="margin-bottom: 10px; font-size: 0.85rem; display: none;"></div>
-
-        <button id="mainBtn" onclick="handleAction()">Start Download</button>
-        
-        <div class="progress-box" id="pbox">
-            <div class="bar-bg"><div class="bar-fill" id="bar"></div></div>
-            <div class="stats">
-                <span id="perc">0.000%</span>
-                <span id="frag">0/0</span>
-            </div>
-        </div>
-        <a id="downloadLink" href="#" target="_blank">📥 Save Result</a>
-
-        <!-- Player UI -->
-        <div class="player-box" id="playerBox">
-            <div class="player-header">
-                <div class="player-title" id="playerTitle">Book Title</div>
-                <button class="player-chapter-btn" onclick="toggleChaptersModal()">📑 Chapters</button>
-            </div>
-            <div class="player-chapter" id="playerChapter">Chapter 1</div>
-            
-            <div class="player-controls">
-                <button class="p-btn p-btn-small" onclick="seekRelative(-15)">⏪</button>
-                <button class="p-btn" id="playBtn" onclick="togglePlay()">▶</button>
-                <button class="p-btn p-btn-small" onclick="seekRelative(15)">⏩</button>
-            </div>
-            
-            <div class="timeline-container" id="timeline" onclick="seek(event)">
-                <div class="timeline-fill" id="timelineFill"></div>
-                <div id="markersContainer"></div>
-            </div>
-            <div class="player-time">
-                <span id="timeCurrent">00:00:00</span>
-                <span id="timeTotal">00:00:00</span>
-            </div>
-            <audio id="audioElement"></audio>
         </div>
 
     </div>
@@ -405,13 +427,50 @@
             document.getElementById('timelineFill').style.width = pct + '%';
             document.getElementById('timeCurrent').innerText = formatTime(audio.currentTime);
             
-            // Update current chapter text
+            // Update current chapter text and progress fills
             if (playerState.mode === 'zip' && playerState.playlist.length > 0) {
                 const track = playerState.playlist[playerState.currentTrackIndex];
                 document.getElementById('playerChapter').innerText = `${playerState.currentTrackIndex + 1} / ${playerState.playlist.length}: ${track.title}`;
             } else if(playerState.chapters.length > 0) {
-                const currentCh = playerState.chapters.find(c => audio.currentTime >= c.start && audio.currentTime < c.end) || playerState.chapters[0];
-                document.getElementById('playerChapter').innerText = currentCh.title;
+                const currentChIndex = playerState.chapters.findIndex(c => audio.currentTime >= c.start && audio.currentTime < c.end);
+                const safeCurrentChIndex = currentChIndex !== -1 ? currentChIndex : 0;
+                
+                document.getElementById('playerChapter').innerText = playerState.chapters[safeCurrentChIndex].title;
+                
+                // Update background fills and times if panel is open to avoid unnecessary DOM queries
+                const container = document.getElementById('appContainer');
+                if (container.classList.contains('panel-open')) {
+                    playerState.chapters.forEach((ch, idx) => {
+                        const fillEl = document.getElementById(`ch-fill-${idx}`);
+                        const timeEl = document.getElementById(`ch-time-${idx}`);
+                        if (fillEl) {
+                            if (idx < safeCurrentChIndex) {
+                                fillEl.style.width = '100%';
+                                if (timeEl) timeEl.innerText = formatTime(ch.start);
+                            } else if (idx > safeCurrentChIndex) {
+                                fillEl.style.width = '0%';
+                                if (timeEl) timeEl.innerText = formatTime(ch.start);
+                            } else {
+                                const dur = ch.end - ch.start;
+                                const fillPct = dur > 0 ? ((audio.currentTime - ch.start) / dur) * 100 : 0;
+                                fillEl.style.width = `${Math.max(0, Math.min(100, fillPct))}%`;
+                                
+                                if (timeEl) {
+                                    const elapsed = Math.max(0, audio.currentTime - ch.start);
+                                    timeEl.innerText = `${formatTime(elapsed)} / ${formatTime(dur)}`;
+                                }
+                                
+                                // Make sure active class is correct on items
+                                const itemEl = document.getElementById(`ch-item-${idx}`);
+                                if (itemEl && !itemEl.classList.contains('active-ch')) {
+                                    // Remove active from all others
+                                    document.querySelectorAll('.chapter-list-item').forEach(el => el.classList.remove('active-ch'));
+                                    itemEl.classList.add('active-ch');
+                                }
+                            }
+                        }
+                    });
+                }
             }
             
             // Save bookmark
@@ -479,11 +538,11 @@
 
         // Chapters Modal Logic
         function toggleChaptersModal() {
-            const modal = document.getElementById('chaptersModal');
-            if (modal.style.display === 'flex') {
-                modal.style.display = 'none';
+            const container = document.getElementById('appContainer');
+            if (container.classList.contains('panel-open')) {
+                container.classList.remove('panel-open');
             } else {
-                modal.style.display = 'flex';
+                container.classList.add('panel-open');
                 renderPlayerChapters();
             }
         }
@@ -510,14 +569,31 @@
                     return;
                 }
                 
-                const currentChIndex = playerState.chapters.findIndex(c => audio.currentTime >= c.start && audio.currentTime < c.end) || 0;
+                const currentChIndex = playerState.chapters.findIndex(c => audio.currentTime >= c.start && audio.currentTime < c.end);
+                const safeCurrentChIndex = currentChIndex !== -1 ? currentChIndex : 0;
 
                 listDiv.innerHTML = playerState.chapters.map((ch, idx) => {
-                    const isActive = idx === currentChIndex ? 'active-ch' : '';
+                    const isActive = idx === safeCurrentChIndex ? 'active-ch' : '';
+                    let fillPct = 0;
+                    let timeText = formatTime(ch.start);
+                    
+                    if (idx < safeCurrentChIndex) fillPct = 100;
+                    else if (idx === safeCurrentChIndex) {
+                        const dur = ch.end - ch.start;
+                        if (dur > 0) {
+                            fillPct = ((audio.currentTime - ch.start) / dur) * 100;
+                            const elapsed = Math.max(0, audio.currentTime - ch.start);
+                            timeText = `${formatTime(elapsed)} / ${formatTime(dur)}`;
+                        }
+                    }
+                    
                     return `
-                        <div class="chapter-list-item ${isActive}" onclick="jumpToChapter(${ch.start})">
-                            <span>${idx + 1}. ${ch.title}</span>
-                            <span>${formatTime(ch.start)}</span>
+                        <div class="chapter-list-item ${isActive}" onclick="handleChapterClick(event, ${idx})" id="ch-item-${idx}">
+                            <div class="chapter-bg-fill" id="ch-fill-${idx}" style="width: ${fillPct}%"></div>
+                            <div class="chapter-content">
+                                <span>${idx + 1}. ${ch.title}</span>
+                                <span id="ch-time-${idx}" style="font-family: monospace; font-size: 0.8rem;">${timeText}</span>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -533,7 +609,26 @@
         function jumpToChapter(startTime) {
             audio.currentTime = startTime;
             if (audio.paused) togglePlay();
-            toggleChaptersModal();
+        }
+
+        function handleChapterClick(event, idx) {
+            const ch = playerState.chapters[idx];
+            if (!ch) return;
+
+            const rect = event.currentTarget.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            
+            // If the user clicked on the very far right (e.g. on the time text), maybe just start the chapter? 
+            // Better yet, just calculate exact position.
+            const percentage = Math.max(0, Math.min(1, clickX / rect.width));
+            
+            const dur = ch.end - ch.start;
+            const newTime = ch.start + (dur * percentage);
+            
+            audio.currentTime = newTime;
+            if (audio.paused) togglePlay();
+            
+            // We don't close the modal automatically here, so they can keep clicking to find the right spot
         }
 
         function jumpToTrack(index) {
