@@ -5,12 +5,14 @@
 ## ✨ Features
 
 -   **Extreme Speed:** Downloads book fragments in **16 concurrent streams**.
--   **Smart Chapter Splitting:** Automatically detects chapters and provides a **ZIP archive** with correctly named files.
--   **No Quality Loss:** Downloads original AAC/MP4 streams directly.
--   **Precision Tracking:** Real-time progress bar with 0.001% precision and fragment counter.
--   **Smart Naming:** Automatically parses "Author - Title" from the page.
--   **Modern UI:** Beautiful Dark/Light mode interface with multi-language support (EN/RU).
--   **Preview Mode:** See the list of chapters before you start downloading.
+-   **Integrated Web Player:** Stream your books directly in the browser with **M4B chapter support** and **ZIP playlist sequential playback**.
+-   **Visual Chapter Progress:** Watch your progress in real-time with background fills and dynamic timers for each chapter in the side panel.
+-   **Smart Library:** Manage and browse all your downloads in a sleek sliding side panel. No need to re-download.
+-   **Smart Bookmarks:** Automatically saves your playback position and current track to pick up exactly where you left off.
+-   **Native Directory Choice:** Select any folder on your computer to save books using a native system dialog.
+-   **Smart Chapter Splitting:** Automatically provides **M4B with embedded chapters** or a **ZIP archive** with correctly named files.
+-   **Modern UI:** A professional 3-panel sliding interface with Dark/Light mode and full **EN/RU localization**.
+-   **No Quality Loss:** Downloads original AAC/MP4/MP3 streams directly.
 
 ## 🛠️ Requirements
 

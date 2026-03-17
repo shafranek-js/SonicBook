@@ -19,11 +19,12 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   - Create an endpoint to fetch the generated `.json` metadata file for a given book.
 - [x] **Step 3: Frontend Player UI:**
   - Build the HTML/CSS player interface in `index.html` (cover, title, play/pause, timeline, time display).
-  - Add a chapter list sidebar or modal.
+  - Implement symmetric sliding panels: Library on the left, Chapters on the right.
 - [x] **Step 4: Frontend Player Logic (JavaScript):**
   - Implement core audio playback and seek functionality.
   - Fetch and parse the JSON metadata to draw chapter markers on the timeline.
-  - Implement `localStorage` bookmarks to save playback position per book.
+  - Add interactive chapter progress bars and dynamic timers in the side panel.
+  - Implement `localStorage` bookmarks to save playback position and track per book.
   - Add playlist logic for `ZIP` mode (playing multiple files sequentially).
 
 ## 🛠️ Technical Debt / Optimizations
