@@ -18,6 +18,7 @@
         * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
         .container { background: var(--card); padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); width: 100%; max-width: 550px; text-align: center; position: relative; }
         .controls { position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; }
+        .controls-left { position: absolute; top: 20px; left: 20px; display: flex; gap: 10px; }
         .btn-icon { background: none; border: 1px solid var(--border); color: var(--muted); width: 40px; height: 40px; border-radius: 10px; cursor: pointer; display: flex; justify-content: center; align-items: center; }
         input { width: 100%; padding: 14px; border: 2px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); margin-bottom: 15px; outline: none; }
         
@@ -53,7 +54,7 @@
         .p-btn-small:hover { background: var(--border); }
         .timeline-container { position: relative; width: 100%; height: 8px; background: var(--border); border-radius: 4px; cursor: pointer; margin-bottom: 8px; }
         .timeline-fill { position: absolute; top: 0; left: 0; height: 100%; background: var(--primary); border-radius: 4px; width: 0%; pointer-events: none; }
-        .timeline-marker { position: absolute; top: -2px; bottom: -2px; width: 2px; background: rgba(255,255,255,0.3); pointer-events: none; }
+        .timeline-marker { position: absolute; top: 0; bottom: 0; width: 1.5px; background: #FFFFFF; opacity: 0.6; pointer-events: none; z-index: 5; }
         .player-time { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--muted); font-family: monospace; }
         audio { display: none; }
 
@@ -61,9 +62,11 @@
         .library-panel { position: absolute; top: 0; left: 20px; width: 350px; height: 100%; background: var(--card); border-radius: 20px 0 0 20px; border: 1px solid var(--border); border-right: none; box-shadow: -10px 10px 25px rgba(0,0,0,0.2); z-index: 1; transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s; opacity: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: none; }
         .container.library-open .library-panel { transform: translateX(-330px); opacity: 1; pointer-events: auto; }
         .library-list { overflow-y: auto; padding: 10px; flex: 1; }
-        .library-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.2s; }
+        .library-item { position: relative; display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.2s; overflow: hidden; }
         .library-item:hover { background: rgba(0,0,0,0.05); }
-        .library-item-info { flex: 1; overflow: hidden; }
+        .library-item.active-lib { border-left: 4px solid var(--primary); padding-left: 11px; background: rgba(99, 102, 241, 0.05); }
+        .library-bg-fill { position: absolute; top: 0; left: 0; height: 100%; width: 0%; background: var(--primary); opacity: 0.1; z-index: 0; pointer-events: none; }
+        .library-item-info { position: relative; z-index: 1; flex: 1; overflow: hidden; }
         .library-item-title { font-weight: 600; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
         .library-item-meta { font-size: 0.75rem; color: var(--muted); }
         .library-item-play { color: var(--primary); font-size: 1.2rem; padding-left: 15px; }
@@ -87,7 +90,8 @@
         .chapters-panel { position: absolute; top: 0; right: 20px; width: 350px; height: 100%; background: var(--card); border-radius: 0 20px 20px 0; border: 1px solid var(--border); border-left: none; box-shadow: 10px 10px 25px rgba(0,0,0,0.2); z-index: 1; transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s; opacity: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: none; }
         .container.panel-open .chapters-panel { transform: translateX(330px); opacity: 1; pointer-events: auto; }
         
-        .panel-header { padding: 20px; border-bottom: 1px solid var(--border); font-weight: bold; font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; }
+        .panel-header { padding: 20px; border-bottom: 1px solid var(--border); font-weight: bold; font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: background 0.2s; }
+        .panel-header:hover { background: rgba(0,0,0,0.05); }
         .panel-content { overflow-y: auto; flex: 1; }
 
         @media (max-width: 950px) {
@@ -101,9 +105,8 @@
     <div class="container" id="appContainer">
         <!-- Library Panel (Slides from Left) -->
         <div class="library-panel" id="libraryPanel">
-            <div class="panel-header">
+            <div class="panel-header" onclick="toggleLibrary()">
                 <div id="t-lib-title">My Library</div>
-                <button class="close-btn" onclick="toggleLibrary()">×</button>
             </div>
             <div class="library-list" id="libraryList">
                 <div class="empty-lib">Loading...</div>
@@ -112,8 +115,10 @@
 
         <!-- Main Card -->
         <div class="main-card">
-            <div class="controls">
+            <div class="controls-left">
                 <button class="btn-icon" id="resetAllBtn" onclick="resetAllData()" title="Reset All Data">🧹</button>
+            </div>
+            <div class="controls">
                 <button class="btn-icon" id="libBtn" onclick="toggleLibrary()" title="Library">📚</button>
                 <button class="btn-icon" onclick="toggleLang()" id="langBtn">RU</button>
                 <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
@@ -181,9 +186,8 @@
 
             <!-- Chapters Panel (Slides from Right of Main Card) -->
             <div class="chapters-panel" id="chaptersPanel">
-            <div class="panel-header">
+            <div class="panel-header" onclick="toggleChaptersModal()">
                 <div id="t-panel-title">Table of Contents</div>
-                <button class="close-btn" onclick="toggleChaptersModal()">×</button>
             </div>
             <div class="panel-content" id="playerChaptersList">
                 <div class="empty-lib" id="t-no-chapters">No chapters available.</div>
@@ -222,17 +226,19 @@
         };
 
         let currentLang = localStorage.getItem('lang') || 'en';
-        let currentMode = 'm4b';
+        let currentMode = localStorage.getItem('mode') || 'm4b';
         let step = 'start';
 
         function setMode(mode) {
             currentMode = mode;
+            localStorage.setItem('mode', mode);
             ['m4b', 'mp3', 'zip'].forEach(m => document.getElementById('mode-'+m).classList.toggle('active', m === mode));
             updateUI();
         }
 
         function updateUI() {
             const t = i18n[currentLang];
+            // ... (rest of translation logic) ...
             document.getElementById('t-subtitle').innerText = t.subtitle;
             document.getElementById('urlInput').placeholder = t.placeholder;
             document.getElementById('downloadLink').innerText = t.saveBtn;
@@ -274,10 +280,33 @@
         }
 
         // Init
-        if (localStorage.getItem('theme') === 'light') {
-            document.body.classList.add('light-theme');
-            document.getElementById('themeBtn').innerText = '☀️';
-        }
+        window.addEventListener('DOMContentLoaded', () => {
+            // Restore theme
+            if (localStorage.getItem('theme') === 'light') {
+                document.body.classList.add('light-theme');
+                document.getElementById('themeBtn').innerText = '☀️';
+            }
+            
+            // Restore Mode
+            setMode(currentMode);
+            
+            // Restore panels
+            if (localStorage.getItem('library-open') === 'true') {
+                document.getElementById('appContainer').classList.add('library-open');
+                loadLibrary();
+            }
+            if (localStorage.getItem('panel-open') === 'true') {
+                document.getElementById('appContainer').classList.add('panel-open');
+            }
+
+            // Restore last played book
+            const lastFile = localStorage.getItem('last-played-file');
+            if (lastFile) {
+                playFromLibrary(lastFile, false, true); // false = don't auto-start audio, true = keep panels open
+            }
+            
+            updateUI();
+        });
         
         async function initFolder() {
             try {
@@ -322,6 +351,9 @@
             document.getElementById('status').style.display = 'none';
             document.getElementById('optGroup').style.display = 'flex';
             document.getElementById('playerBox').style.display = 'none';
+            document.getElementById('appContainer').classList.remove('panel-open');
+            localStorage.setItem('panel-open', 'false');
+            localStorage.removeItem('last-played-file');
             if (!audio.paused) {
                 audio.pause();
             }
@@ -332,12 +364,9 @@
         // Library Logic
         function toggleLibrary() {
             const container = document.getElementById('appContainer');
-            if (container.classList.contains('library-open')) {
-                container.classList.remove('library-open');
-            } else {
-                container.classList.add('library-open');
-                loadLibrary();
-            }
+            const isOpen = container.classList.toggle('library-open');
+            localStorage.setItem('library-open', isOpen);
+            if (isOpen) loadLibrary();
         }
 
         async function loadLibrary() {
@@ -355,17 +384,30 @@
 
                 listDiv.innerHTML = data.files.map(f => {
                     const date = new Date(f.mtime * 1000).toLocaleDateString();
+                    
+                    // Calculate progress from bookmark
+                    let fillPct = 0;
+                    try {
+                        const saved = JSON.parse(localStorage.getItem('bookmark_' + f.name));
+                        if (saved && saved.time && saved.duration) {
+                            fillPct = (saved.time / saved.duration) * 100;
+                        }
+                    } catch(e) {}
+
+                    const isActive = playerState.fileName === f.name ? 'active-lib' : '';
+
                     return `
-                        <div class="library-item" onclick="playFromLibrary('${f.name}')">
+                        <div class="library-item ${isActive}" onclick="playFromLibrary('${f.name.replace(/'/g, "\\'")}', true, true)">
+                            <div class="library-bg-fill" style="width: ${fillPct}%"></div>
                             <div class="library-item-info">
                                 <div class="library-item-title">${f.name}</div>
                                 <div class="library-item-meta">${f.size_mb} MB • ${date} ${f.has_meta ? '• 📑' : ''}</div>
                             </div>
-                            <div style="display: flex; gap: 10px; align-items: center;">
+                            <div style="display: flex; gap: 10px; align-items: center; position: relative; z-index: 1;">
                                 <button class="btn-icon" style="width: 30px; height: 30px; font-size: 0.8rem;" 
                                         onclick="resetBookProgress(event, '${f.name.replace(/'/g, "\\'")}')" 
                                         title="${t.resetTooltip}">↺</button>
-                                <div class="library-item-play">▶</div>
+                                <div class="library-item-play" id="lib-play-${f.name.replace(/'/g, "\\'").replace(/\s+/g, '-')}">▶</div>
                             </div>
                         </div>
                     `;
@@ -375,17 +417,33 @@
             }
         }
 
-        function playFromLibrary(fileName) {
-            document.getElementById('appContainer').classList.remove('library-open');
-            resetForm(); // Hide download UI
-            step = 'done'; // Set state to done so "Download Another" works correctly
+        function playFromLibrary(fileName, autoPlay = true, keepPanels = false) {
+            if (playerState.fileName === fileName && autoPlay) {
+                togglePlay();
+                return;
+            }
+            if (!keepPanels) {
+                resetForm(); // Hide download UI and potentially close panels if not keeping them
+            } else {
+                // Just hide the download-specific parts but keep panels
+                document.getElementById('optGroup').style.display = 'none';
+                document.getElementById('chaptersBox').style.display = 'none';
+                document.getElementById('status').style.display = 'none';
+            }
+            
+            // Re-ensure persistence isn't wiped if we want to keep it
+            localStorage.setItem('last-played-file', fileName);
+            
+            step = 'done';
             document.getElementById('mainBtn').innerText = i18n[currentLang].btnAgain;
             initPlayer(fileName);
-            // Auto play
-            setTimeout(() => {
-                audio.play();
-                document.getElementById('playBtn').innerText = '⏸';
-            }, 500);
+            
+            if (autoPlay) {
+                setTimeout(() => {
+                    audio.play();
+                    document.getElementById('playBtn').innerText = '⏸';
+                }, 500);
+            }
         }
 
         function resetBookProgress(event, fileName) {
@@ -494,7 +552,7 @@
                 
                 document.getElementById('playerChapter').innerText = playerState.chapters[safeCurrentChIndex].title;
                 
-                // Update background fills and times if panel is open to avoid unnecessary DOM queries
+                // Update background fills and times if panel is open
                 const container = document.getElementById('appContainer');
                 if (container.classList.contains('panel-open')) {
                     playerState.chapters.forEach((ch, idx) => {
@@ -517,10 +575,9 @@
                                     timeEl.innerText = `${formatTime(elapsed)} / ${formatTime(dur)}`;
                                 }
                                 
-                                // Make sure active class is correct on items
+                                // Active class
                                 const itemEl = document.getElementById(`ch-item-${idx}`);
                                 if (itemEl && !itemEl.classList.contains('active-ch')) {
-                                    // Remove active from all others
                                     document.querySelectorAll('.chapter-list-item').forEach(el => el.classList.remove('active-ch'));
                                     itemEl.classList.add('active-ch');
                                 }
@@ -530,10 +587,11 @@
                 }
             }
             
-            // Save bookmark
+            // Save bookmark with duration for library progress
             if(playerState.fileName) {
                 const bmk = {
                     time: audio.currentTime,
+                    duration: audio.duration,
                     track: playerState.currentTrackIndex
                 };
                 localStorage.setItem('bookmark_' + playerState.fileName, JSON.stringify(bmk));
@@ -544,11 +602,20 @@
             playerState.duration = audio.duration;
             document.getElementById('timeTotal').innerText = formatTime(audio.duration);
             
+            // Draw chapter markers now that we have accurate duration
+            if (playerState.mode === 'm4b' && playerState.chapters.length > 0) {
+                const markersHtml = playerState.chapters.map(ch => {
+                    const leftPct = (ch.start / audio.duration) * 100;
+                    return `<div class="timeline-marker" style="left: ${leftPct}%;" title="${ch.title}"></div>`;
+                }).join('');
+                document.getElementById('markersContainer').innerHTML = markersHtml;
+            }
+            
             // Restore bookmark ONLY if we just loaded the file manually (not auto-playing next track)
             if(playerState.fileName && !audio.autoplay) {
                 try {
                     const saved = JSON.parse(localStorage.getItem('bookmark_' + playerState.fileName));
-                    if(saved && saved.time) audio.currentTime = parseFloat(saved.time);
+                    if(saved && saved.time) audio.currentTime = Math.max(0, Math.min(audio.duration, parseFloat(saved.time)));
                 } catch(e) {}
             }
         });
@@ -560,8 +627,30 @@
                 playCurrentTrack(true);
             } else {
                 document.getElementById('playBtn').innerText = '▶';
+                syncLibraryPlayIcons();
             }
         });
+
+        audio.addEventListener('play', () => {
+            document.getElementById('playBtn').innerText = '⏸';
+            syncLibraryPlayIcons();
+        });
+
+        audio.addEventListener('pause', () => {
+            document.getElementById('playBtn').innerText = '▶';
+            syncLibraryPlayIcons();
+        });
+
+        function syncLibraryPlayIcons() {
+            // Reset all icons first
+            document.querySelectorAll('.library-item-play').forEach(el => el.innerText = '▶');
+            // If playing, find the current one
+            if (!audio.paused && playerState.fileName) {
+                const id = "lib-play-" + playerState.fileName.replace(/'/g, "\\'").replace(/\s+/g, '-');
+                const el = document.getElementById(id);
+                if (el) el.innerText = '⏸';
+            }
+        }
 
         function togglePlay() {
             if (audio.paused) {
@@ -596,12 +685,9 @@
         // Chapters Modal Logic
         function toggleChaptersModal() {
             const container = document.getElementById('appContainer');
-            if (container.classList.contains('panel-open')) {
-                container.classList.remove('panel-open');
-            } else {
-                container.classList.add('panel-open');
-                renderPlayerChapters();
-            }
+            const isOpen = container.classList.toggle('panel-open');
+            localStorage.setItem('panel-open', isOpen);
+            if (isOpen) renderPlayerChapters();
         }
 
         function renderPlayerChapters() {
@@ -770,20 +856,14 @@
                                 audio.removeEventListener('loadedmetadata', onMeta);
                             });
                         }
+                        // Refresh panel if open
+                        if (document.getElementById('appContainer').classList.contains('panel-open')) renderPlayerChapters();
                         return;
                     } else if(meta.chapters && meta.chapters.length > 0) {
                         playerState.mode = 'm4b';
                         playerState.chapters = meta.chapters;
-                        // Draw markers if duration is known from metadata
-                        const lastCh = meta.chapters[meta.chapters.length - 1];
-                        const totalMetaDur = lastCh.end;
-                        if(totalMetaDur > 0) {
-                            const markersHtml = meta.chapters.map(ch => {
-                                const leftPct = (ch.start / totalMetaDur) * 100;
-                                return `<div class="timeline-marker" style="left: ${leftPct}%;" title="${ch.title}"></div>`;
-                            }).join('');
-                            document.getElementById('markersContainer').innerHTML = markersHtml;
-                        }
+                        // Refresh panel if open
+                        if (document.getElementById('appContainer').classList.contains('panel-open')) renderPlayerChapters();
                     }
                 }
             } catch(e) { console.log('No metadata found', e); }
