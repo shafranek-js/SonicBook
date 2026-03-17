@@ -26,6 +26,8 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   - Add interactive chapter progress bars and dynamic timers in the side panel.
   - Implement `localStorage` bookmarks to save playback position and track per book.
   - Add playlist logic for `ZIP` mode (playing multiple files sequentially).
+  - Add UI state persistence across page reloads (open panels, last book, mode).
+  - Implement dynamic Play/Pause icon syncing in the library list.
 
 ## 🛠️ Technical Debt / Optimizations
 - [ ] **Playwright Optimization:** Use a persistent browser context instead of launching a new browser per request.
