@@ -113,6 +113,7 @@
         <!-- Main Card -->
         <div class="main-card">
             <div class="controls">
+                <button class="btn-icon" id="resetAllBtn" onclick="resetAllData()" title="Reset All Data">🧹</button>
                 <button class="btn-icon" id="libBtn" onclick="toggleLibrary()" title="Library">📚</button>
                 <button class="btn-icon" onclick="toggleLang()" id="langBtn">RU</button>
                 <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
@@ -201,7 +202,9 @@
                 saveTo: "Save to:", changeBtn: "Change", libTitle: "My Library", libEmpty: "Your library is empty.",
                 tocTitle: "Table of Contents", noChaptersInPanel: "No chapters available for this book.",
                 loadingDialog: "Loading dialog...", assemblingStatus: "⚙️ Assembling M4B... Please wait",
-                libTooltip: "Library", themeTooltip: "Theme", langTooltip: "Language"
+                libTooltip: "Library", themeTooltip: "Theme", langTooltip: "Language",
+                resetTooltip: "Reset playback progress",
+                confirmReset: "Are you sure you want to reset progress for this book?"
             },
             ru: {
                 subtitle: "Продвинутый загрузчик аудиокниг", placeholder: "Вставьте ссылку...",
@@ -212,7 +215,9 @@
                 saveTo: "Сохранять в:", changeBtn: "Изменить", libTitle: "Моя Библиотека", libEmpty: "Библиотека пуста.",
                 tocTitle: "Оглавление", noChaptersInPanel: "Для этой книги нет списка глав.",
                 loadingDialog: "Открытие окна...", assemblingStatus: "⚙️ Сборка M4B... Пожалуйста, подождите",
-                libTooltip: "Библиотека", themeTooltip: "Тема", langTooltip: "Язык"
+                libTooltip: "Библиотека", themeTooltip: "Тема", langTooltip: "Язык",
+                resetTooltip: "Сбросить прогресс прослушивания",
+                confirmReset: "Вы уверены, что хотите сбросить прогресс для этой книги?"
             }
         };
 
@@ -243,9 +248,10 @@
             document.getElementById('btn-player-chapters').innerText = '📑 ' + (currentLang === 'en' ? 'Chapters' : 'Главы');
             
             // Tooltips
-            document.querySelector('[title="Library"]').title = t.libTooltip;
+            document.getElementById('libBtn').title = t.libTooltip;
             document.getElementById('themeBtn').title = t.themeTooltip;
             document.getElementById('langBtn').title = t.langTooltip;
+            document.getElementById('resetAllBtn').title = "Clear all app data & cache";
 
             const btn = document.getElementById('mainBtn');
             if (step === 'start') btn.innerText = (currentMode === 'm4b' || currentMode === 'zip') ? t.btnFetch : t.btnStart;
@@ -258,6 +264,13 @@
             const isLight = document.body.classList.toggle('light-theme');
             document.getElementById('themeBtn').innerText = isLight ? '☀️' : '🌙';
             localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        }
+        
+        function resetAllData() {
+            if(confirm("This will clear all your bookmarks and settings. Continue?")) {
+                localStorage.clear();
+                location.reload();
+            }
         }
 
         // Init
@@ -348,7 +361,12 @@
                                 <div class="library-item-title">${f.name}</div>
                                 <div class="library-item-meta">${f.size_mb} MB • ${date} ${f.has_meta ? '• 📑' : ''}</div>
                             </div>
-                            <div class="library-item-play">▶</div>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <button class="btn-icon" style="width: 30px; height: 30px; font-size: 0.8rem;" 
+                                        onclick="resetBookProgress(event, '${f.name.replace(/'/g, "\\'")}')" 
+                                        title="${t.resetTooltip}">↺</button>
+                                <div class="library-item-play">▶</div>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -368,6 +386,20 @@
                 audio.play();
                 document.getElementById('playBtn').innerText = '⏸';
             }, 500);
+        }
+
+        function resetBookProgress(event, fileName) {
+            event.stopPropagation();
+            const t = i18n[currentLang];
+            if (confirm(t.confirmReset)) {
+                localStorage.removeItem('bookmark_' + fileName);
+                // If this is the currently playing book, reset player time
+                if (playerState.fileName === fileName) {
+                    audio.currentTime = 0;
+                    document.getElementById('timelineFill').style.width = '0%';
+                }
+                loadLibrary(); // Refresh list to show it's done (optional visual feedback)
+            }
         }
 
         async function fetchInfo() {
@@ -693,24 +725,22 @@
             document.getElementById('playBtn').innerText = '▶';
             audio.autoplay = false;
 
-            // Try loading bookmark to see if we have a track index saved
+            // Try loading bookmark
             let savedBmk = null;
             try {
-                // Handle legacy bookmarks (which were just floats)
                 const rawBmk = localStorage.getItem('bookmark_' + fileName);
                 if (rawBmk && !rawBmk.startsWith('{')) {
                     savedBmk = { time: parseFloat(rawBmk), track: 0 };
                 } else if (rawBmk) {
                     savedBmk = JSON.parse(rawBmk);
                 }
-                
-                if (savedBmk && savedBmk.track !== undefined) {
-                    playerState.currentTrackIndex = savedBmk.track;
-                }
-            } catch(e) {}
+            } catch(e) { 
+                console.warn('Invalid bookmark format, clearing...', e);
+                localStorage.removeItem('bookmark_' + fileName);
+            }
 
             try {
-                const res = await fetch('/api/metadata/' + fileName);
+                const res = await fetch('/api/metadata/' + encodeURIComponent(fileName) + '?t=' + Date.now());
                 if(res.ok) {
                     const meta = await res.json();
                     if(meta.title) {
@@ -721,16 +751,26 @@
                     if (meta.mode === 'zip' && meta.playlist) {
                         playerState.mode = 'zip';
                         playerState.playlist = meta.playlist;
+                        
+                        // Validate track index from bookmark
+                        if (savedBmk && (savedBmk.track < 0 || savedBmk.track >= meta.playlist.length)) {
+                            console.warn('Bookmark track index out of bounds, resetting to 0');
+                            savedBmk.track = 0;
+                            savedBmk.time = 0;
+                        }
+                        
+                        playerState.currentTrackIndex = (savedBmk && savedBmk.track !== undefined) ? savedBmk.track : 0;
                         playCurrentTrack(false);
                         
                         // Apply time bookmark for zip if exists
                         if (savedBmk && savedBmk.time) {
                             audio.addEventListener('loadedmetadata', function onMeta() {
-                                audio.currentTime = parseFloat(savedBmk.time);
+                                // Clamp time just in case
+                                audio.currentTime = Math.max(0, Math.min(audio.duration || 0, parseFloat(savedBmk.time)));
                                 audio.removeEventListener('loadedmetadata', onMeta);
                             });
                         }
-                        return; // Return early, standard audio load is handled by playCurrentTrack
+                        return;
                     } else if(meta.chapters && meta.chapters.length > 0) {
                         playerState.mode = 'm4b';
                         playerState.chapters = meta.chapters;
@@ -749,13 +789,12 @@
             } catch(e) { console.log('No metadata found', e); }
 
             // Default fallback for single/m4b
-            // Fix URI encoding for file paths
             audio.src = '/api/files/' + encodeURIComponent(fileName);
             audio.load();
             
             if (savedBmk && savedBmk.time) {
                 audio.addEventListener('loadedmetadata', function onMeta() {
-                    audio.currentTime = parseFloat(savedBmk.time);
+                    audio.currentTime = Math.max(0, Math.min(audio.duration || 0, parseFloat(savedBmk.time)));
                     audio.removeEventListener('loadedmetadata', onMeta);
                 });
             }

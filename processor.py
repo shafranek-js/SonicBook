@@ -26,8 +26,9 @@ async def get_stream_duration(m3u8_url):
 
 def sanitize_filename(name):
     import string
+    # Remove commas and other potential problematic chars for shell/ffmpeg
     valid_chars = f"-_.() {string.ascii_letters}{string.digits}абвгдеёжзийклмнопрстуфхцчшщъыьэюяАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
-    cleaned = "".join(c for c in name if c in valid_chars)
+    cleaned = "".join(c for c in name if c in valid_chars and c != ',')
     return " ".join(cleaned.split()).strip(". ")[:100]
 
 async def create_m4b_with_chapters(source_file, chapters, title_base, task_id):
@@ -36,8 +37,14 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id):
     meta_path = os.path.join(config.DOWNLOADS_DIR, f"meta_{task_id}.txt")
     
     meta_content = ";FFMETADATA1\ntitle=" + title_base + "\n"
-    for ch in chapters:
-        s, e = int(ch['start'] * 1000), int(ch['end'] * 1000)
+    for i, ch in enumerate(chapters):
+        s = int(ch['start'] * 1000)
+        e = int(ch['end'] * 1000)
+        
+        # FFmpeg requirement: END must be greater than START
+        if e <= s:
+            e = s + 1000 # Default to 1 second if end is missing or invalid
+            
         meta_content += f"\n[CHAPTER]\nTIMEBASE=1/1000\nSTART={s}\nEND={e}\ntitle={ch['title']}\n"
     
     async with aiofiles.open(meta_path, "w", encoding="utf-8") as f:
@@ -51,8 +58,11 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id):
         "-map_metadata", "1", "-c:a", "copy", temp_m4b
     ]
     
-    process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-    await process.wait()
+    process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    stdout, stderr = await process.communicate()
+    
+    if process.returncode != 0:
+        log_debug(f"FFmpeg Error (code {process.returncode}): {stderr.decode(errors='replace')}")
     
     if os.path.exists(meta_path): os.remove(meta_path)
     

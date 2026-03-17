@@ -156,24 +156,60 @@ async def get_book_info(book_url):
                 await asyncio.sleep(1)
 
             if not res["chapters"]:
-                log_debug("BS4 chapters empty, parsing DOM elements (.ls-item)...")
+                log_debug("BS4 chapters empty, parsing DOM elements...")
                 res["chapters"] = await page.evaluate("""() => {
                     let items = [];
-                    document.querySelectorAll('.ls-item').forEach(el => {
-                        let titleEl = el.querySelector('.ls-title');
-                        let timeEl = el.querySelector('.ls-time');
-                        if (titleEl) {
-                            items.push({
-                                title: titleEl.innerText.trim(),
-                                start: parseFloat(el.getAttribute('data-time') || 0),
-                                end: 0
+                    
+                    // 1. Try standard akniga layout (.ls-item)
+                    let standardItems = document.querySelectorAll('.ls-item');
+                    if (standardItems.length > 0) {
+                        standardItems.forEach(el => {
+                            let titleEl = el.querySelector('.ls-title');
+                            if (titleEl) {
+                                items.push({
+                                    title: titleEl.innerText.trim(),
+                                    start: parseFloat(el.getAttribute('data-time') || 0),
+                                    end: 0
+                                });
+                            }
+                        });
+                    }
+                    
+                    // 2. Try old/alternative akniga layout (.chapter__default)
+                    if (items.length === 0) {
+                        let oldItems = document.querySelectorAll('.chapter__default');
+                        if (oldItems.length > 0) {
+                            oldItems.forEach(el => {
+                                let titleEl = el.querySelector('.chapter__default--title');
+                                let pos = el.getAttribute('data-pos');
+                                if (titleEl && pos !== null) {
+                                    items.push({
+                                        title: titleEl.innerText.trim(),
+                                        start: parseFloat(pos),
+                                        end: 0
+                                    });
+                                }
                             });
                         }
-                    });
-                    let jsData = window.items || window.playlist;
-                    if (jsData && Array.isArray(jsData)) {
-                        return jsData.map(i => ({title: i.title, start: i.time_from_start, end: i.time_finish}));
                     }
+
+                    // 3. Post-process to set 'end' times
+                    for (let i = 0; i < items.length; i++) {
+                        if (i < items.length - 1) {
+                            items[i].end = items[i+1].start;
+                        }
+                    }
+
+                    // 4. Try Global JS Variables (highest priority if found)
+                    let jsData = window.items || window.playlist || window.free_playlist;
+                    if (jsData && Array.isArray(jsData) && jsData.length > 0) {
+                        return jsData.map(i => ({
+                            title: i.title || i.name || "Chapter", 
+                            start: parseFloat(i.time_from_start || i.start || 0), 
+                            end: parseFloat(i.time_finish || i.end || 0)
+                        }));
+                    }
+                    
                     return items;
                 }""")
                 log_debug(f"DOM parsing found {len(res['chapters'])} chapters")
