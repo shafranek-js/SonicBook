@@ -85,6 +85,8 @@ function clearPlayerCover() {
         return;
     }
     coverFrame.style.display = 'none';
+    coverFrame.classList.remove('is-playing', 'is-paused');
+    coverFrame.setAttribute('title', 'Play / Pause');
     coverBg.style.backgroundImage = '';
     coverImg.style.display = 'none';
     coverImg.style.maxHeight = 'none';
@@ -100,6 +102,7 @@ function setPlayerCover(src) {
     }
     coverBg.style.backgroundImage = `url("${src.replace(/"/g, '\\"')}")`;
     coverFrame.style.display = 'block';
+    coverFrame.classList.add('is-paused');
     coverImg.style.display = 'block';
     coverImg.style.maxHeight = 'none';
     coverImg.src = src;
@@ -109,12 +112,22 @@ function setPlayerCover(src) {
 function setPlayButtonState(isPlaying) {
     const playBtn = document.getElementById('playBtn');
     const playBtnIcon = document.getElementById('playBtnIcon');
+    const coverFrame = document.getElementById('playerCoverFrame');
+    const coverOverlayIcon = document.getElementById('playerCoverOverlayIcon');
     if (!playBtn || !playBtnIcon) {
         return;
     }
     playBtnIcon.className = `player-icon ${isPlaying ? 'player-icon-pause' : 'player-icon-play'}`;
     playBtn.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
     playBtn.setAttribute('title', isPlaying ? 'Pause' : 'Play');
+    if (coverOverlayIcon) {
+        coverOverlayIcon.className = `player-cover-overlay-icon player-icon ${isPlaying ? 'player-icon-pause' : 'player-icon-play'}`;
+    }
+    if (coverFrame) {
+        coverFrame.classList.toggle('is-playing', isPlaying);
+        coverFrame.classList.toggle('is-paused', !isPlaying);
+        coverFrame.setAttribute('title', isPlaying ? 'Pause' : 'Play');
+    }
 }
 
 // Load custom widths

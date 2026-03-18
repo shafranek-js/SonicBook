@@ -171,6 +171,34 @@ button#mainBtn:disabled { opacity: 0.5; }
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(255,255,255,0.05);
     isolation: isolate;
+    cursor: pointer;
+}
+.player-cover-frame:active { transform: scale(0.997); }
+.player-cover-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.16);
+    opacity: 0;
+    transition: opacity 0.2s ease, background 0.2s ease;
+    pointer-events: none;
+}
+.player-cover-frame:hover .player-cover-overlay,
+.player-cover-frame:focus-within .player-cover-overlay,
+.player-cover-frame.is-paused .player-cover-overlay {
+    opacity: 1;
+}
+.player-cover-frame.is-playing .player-cover-overlay {
+    background: rgba(15, 23, 42, 0.08);
+}
+.player-cover-overlay-icon {
+    width: 54px;
+    height: 54px;
+    color: #ffffff;
+    filter: drop-shadow(0 8px 18px rgba(0,0,0,0.35));
 }
 .player-cover-bg {
     position: absolute;

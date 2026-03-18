@@ -67,8 +67,11 @@
 
             <!-- Player UI -->
             <div class="player-box" id="playerBox">
-                <div class="player-cover-frame" id="playerCoverFrame">
+                <div class="player-cover-frame" id="playerCoverFrame" onclick="togglePlay()" title="Play / Pause">
                     <div class="player-cover-bg" id="playerCoverBg" aria-hidden="true"></div>
+                    <div class="player-cover-overlay" id="playerCoverOverlay" aria-hidden="true">
+                        <span class="player-cover-overlay-icon player-icon player-icon-play" id="playerCoverOverlayIcon"></span>
+                    </div>
                     <img id="playerCover" src="">
                 </div>
                 <div class="player-header">
