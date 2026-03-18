@@ -7,6 +7,7 @@ import shutil
 import logging
 import aiofiles
 import httpx
+from urllib.parse import urlparse
 import config
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,22 @@ def sanitize_filename(name):
     cleaned = "".join(c for c in name if c in valid_chars and c != ',')
     return " ".join(cleaned.split()).strip(". ")[:100]
 
-async def create_m4b_with_chapters(source_file, chapters, title_base, task_id):
+def resolve_cover_extension(cover_url, content_type):
+    content_type = (content_type or "").split(";")[0].strip().lower()
+    if content_type in {"image/jpeg", "image/jpg"}:
+        return ".jpg"
+    if content_type == "image/png":
+        return ".png"
+    if content_type == "image/webp":
+        return ".webp"
+
+    url_ext = os.path.splitext(urlparse(cover_url).path)[1].lower()
+    if url_ext in {".jpg", ".jpeg", ".png", ".webp"}:
+        return ".jpg" if url_ext == ".jpeg" else url_ext
+
+    return ".jpg"
+
+async def create_m4b_with_chapters(source_file, chapters, title_base, task_id, cover_path=None):
     """Исправлено: Использование нейтральных имен для FFmpeg во избежание ошибок кодировки"""
     log_debug(f"M4B assembly for task {task_id}...")
     meta_path = os.path.join(config.DOWNLOADS_DIR, f"meta_{task_id}.txt")
@@ -54,9 +70,15 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id):
     temp_m4b = os.path.join(config.DOWNLOADS_DIR, f"out_{task_id}.m4b")
     
     cmd = [
-        config.FFMPEG_PATH, "-y", "-i", source_file, "-i", meta_path,
-        "-map_metadata", "1", "-c:a", "copy", temp_m4b
+        config.FFMPEG_PATH, "-y", "-i", source_file, "-i", meta_path
     ]
+    
+    if cover_path and os.path.exists(cover_path):
+        cmd.extend(["-i", cover_path, "-map", "0", "-map", "2", "-c", "copy", "-disposition:v", "attached_pic"])
+    else:
+        cmd.extend(["-c:a", "copy"])
+        
+    cmd.extend(["-map_metadata", "1", temp_m4b])
     
     process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
@@ -181,10 +203,13 @@ async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
     shutil.rmtree(temp_dir)
     return merged_file
 
-async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progress_callback):
+async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progress_callback, cover_url=None, source_url=None):
+    total_frags = 0
+
     # ПРОВЕРКА НА ПРЯМЫЕ ССЫЛКИ
     if m3u8_url.startswith("DIRECT_URLS:"):
         urls = m3u8_url.replace("DIRECT_URLS:", "").split(",")
+        total_frags = len(urls)
         temp_dir = os.path.join(config.DOWNLOADS_DIR, f"dl_dir_{task_id}")
         source = await download_direct_urls(urls, temp_dir, task_id, progress_callback)
         if not source: return None
@@ -194,7 +219,6 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
         temp_base = os.path.join(config.DOWNLOADS_DIR, f"dl_{task_id}")
         
         # Получаем общее количество фрагментов, если это возможно, для fallback-расчетов
-        total_frags = 0
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get(m3u8_url, timeout=10)
@@ -261,6 +285,7 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                 'ffmpeg_location': config.FFMPEG_PATH,
                 'quiet': True,
                 'no_warnings': True,
+                'noprogress': True,
                 'progress_hooks': [progress_hook],
             }
             
@@ -269,7 +294,7 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                     ydl.download([m3u8_url])
                 return True
             except Exception as e:
-                log_debug(f"yt-dlp Python API error: {e}")
+                logger.exception("yt-dlp Python API error for %s", m3u8_url)
                 return False
 
         try:
@@ -288,6 +313,23 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                 source_ext = ext
                 break
 
+    # Download cover if provided
+    cover_path = None
+    if cover_url:
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(cover_url, follow_redirects=True, timeout=30)
+                if r.status_code == 200 and r.headers.get("content-type", "").lower().startswith("image/"):
+                    c_ext = resolve_cover_extension(cover_url, r.headers.get("content-type"))
+                    cover_path = os.path.join(config.DOWNLOADS_DIR, f"{title_base}{c_ext}")
+                    async with aiofiles.open(cover_path, 'wb') as f:
+                        await f.write(r.content)
+                else:
+                    cover_path = None
+        except Exception as e:
+            log_debug(f"Failed to download cover: {e}")
+            cover_path = None
+
     # ФИНАЛЬНАЯ СБОРКА И НАРЕЗКА (ОБЩАЯ ДЛЯ ОБОИХ МЕТОДОВ)
     try:
         if source:
@@ -297,7 +339,7 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
             if mode == "zip" and chapters:
                 final_file = await split_to_chapters(source, chapters, title_base, task_id, source_ext)
             elif mode == "m4b" and chapters:
-                final_file = await create_m4b_with_chapters(source, chapters, title_base, task_id)
+                final_file = await create_m4b_with_chapters(source, chapters, title_base, task_id, cover_path)
             else:
                 final_file = f"{title_base}{source_ext}"
                 dest = os.path.join(config.DOWNLOADS_DIR, final_file)
@@ -314,7 +356,10 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                     "title": title_base,
                     "mode": mode,
                     "file_name": final_file,
-                    "chapters": chapters
+                    "chapters": chapters,
+                    "source_url": source_url,
+                    "cover_url": cover_url,
+                    "local_cover": os.path.basename(cover_path) if cover_path else None
                 }
                 async with aiofiles.open(meta_json_path, "w", encoding="utf-8") as f:
                     await f.write(json.dumps(meta_data, ensure_ascii=False, indent=2))

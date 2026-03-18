@@ -31,16 +31,56 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
 
 ## ✨ Version 1.1 Features (Polishing & UX)
 - [x] 1. **Library Search:** Add a real-time JS-based search input to the "My Library" panel to quickly filter downloaded books.
-- [ ] 2. **Book Covers:**
+- [x] 2. **Book Covers:**
   - Update `scraper.py` to extract the high-resolution cover image URL.
   - Update `processor.py` to download and save the cover as `[book_name].jpg`.
   - Update the UI to display the cover image cleanly below or alongside the central player.
-- [ ] 3. **Keyboard Shortcuts:** Add global hotkeys (Space for Play/Pause, Left/Right arrows for 15s seek).
-- [ ] 4. **Media Session API:** Integrate `navigator.mediaSession` to allow users to control playback from their OS media widget, lock screen, or physical media keys, complete with metadata (title, artist, cover art).
+- [x] 3. **Keyboard Shortcuts:** Add global hotkeys (Space for Play/Pause, Left/Right arrows for 15s seek).
+- [x] 4. **Media Session API:** Integrate `navigator.mediaSession` to allow users to control playback from their OS media widget, lock screen, or physical media keys, complete with metadata (title, artist, cover art).
 - [x] 1. **Async ZIP Extraction:** Fix event loop blocking in `main.py` by moving `zipfile.extractall` to a separate thread executor.
 - [x] 2. **Race Condition Protection:** Add `asyncio.Lock` for ZIP extraction to prevent filesystem corruption on concurrent requests.
 - [x] 3. **Frontend Componentization:** Extract CSS and JS from `index.html` into `static/style.css` and `static/app.js` for better maintainability and caching.
 - [x] 4. **Playwright Optimization:** Initialize a single persistent browser context in FastAPI `lifespan` instead of launching a new one per request.
 - [x] 5. **Subprocess Timeouts:** Add strict `asyncio.wait_for` timeouts to `yt-dlp` and `ffmpeg` execution to prevent memory/process leaks on network hangs.
 - [x] 6. **Modernize Progress Delivery:** Replace polling (`setInterval`) with Server-Sent Events (SSE) or WebSockets for real-time progress updates without DDoS-ing the server.
-- [ ] 7. **State Management:** Migrate `progress_store` to Redis for multi-worker support (Optional/Advanced).
+- [x] 8. **Library Chapter Auto-Open:** Automatically open the right-side chapters panel when a user selects a library item that has chapter metadata.
+- [x] 9. **Compact Center Panel Layout:** Remove redundant hero text, move the save-path control into the toolbar, and normalize spacing in the middle panel.
+- [x] 10. **Adaptive Player Cover Layout:** Let the player cover grow to full width while dynamically constraining height so the center panel stays fully visible without a vertical scrollbar.
+- [x] 11. **Retroactive Cover Backfill:** Add a standalone `backfill_covers.py` utility plus `cover_aliases.json` overrides to populate missing artwork for older library items.
+- [x] 12. **Unified Progress Fill Styling:** Use the same primary-color translucent progress fill treatment in both the library list and the chapter panel.
+- [x] 13. **Blur-Backed Cover Frame:** Fill unused side space around tall cover art with a blurred copy of the same image behind the main player cover.
+- [x] 14. **Standardize Player Controls:** Replace emoji transport buttons with standard media-style controls and align the chapters button with the same visual language.
+
+## Code Review Findings
+
+### P1 - Critical
+- [x] **Escape untrusted chapter titles in `static/app.js`:**
+  Stop interpolating remote chapter and playlist titles directly into `innerHTML` so untrusted book pages cannot inject script into the UI.
+- [x] **Fix `knigavuhe.org` tuple contract in `scraper.py`:**
+  Return exactly 4 values from `get_book_info()` in the direct-URL branch so `/api/info` and `/api/download` stop crashing on unpack.
+- [x] **Fix uninitialized `total_frags` in `processor.py`:**
+  Ensure the `DIRECT_URLS:` path initializes and reports assembly progress without raising `UnboundLocalError`.
+- [x] **Close absolute-path escape in file endpoints:**
+  Harden `/api/files` and `/api/metadata` path handling in `main.py` so Windows drive-letter and UNC paths cannot escape `DOWNLOADS_DIR`.
+- [x] **Fix chapter duration parsing in `scraper.py`:**
+  Replace the broken `value.split(':')` reference with the real `time_str` input so BS4 chapter timing works again.
+
+### P2 - High
+- [x] **Convert unexpected `process_book()` failures into terminal error states:**
+  Add a top-level exception guard in `main.py` so crashed background tasks do not leave permanent non-terminal `progress_store` entries behind.
+- [x] **Merge sidecar metadata into ZIP playback responses:**
+  Reuse the generated JSON metadata in `main.py` for ZIP books so title and cover art are available in the player.
+- [x] **Avoid mutating `DOWNLOADS_DIR` before settings save succeeds:**
+  Update `config.py` so folder changes only affect runtime state after directory creation and `settings.json` persistence succeed.
+- [x] **Refresh `progress_store` timestamps during active downloads:**
+  Update task timestamps on progress writes so long downloads are not evicted by `cleanup_task()` before completion.
+- [x] **Implement real async ZIP extraction with locking:**
+  Move `zipfile.extractall()` off the event loop and actually use `zip_extraction_locks` in `main.py`.
+- [x] **Remove hardcoded FFmpeg paths from `config.py`:**
+  Default to `ffmpeg` and `ffprobe` or another portable configuration instead of machine-specific local paths.
+- [x] **Repair `requirements.txt` encoding/content:**
+  Remove the corrupted `aiofiles` line with embedded NUL characters so clean installs work reliably.
+
+## Current Status
+
+- [x] **No open TODO items remain in this file.**

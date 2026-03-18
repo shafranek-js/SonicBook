@@ -10,11 +10,10 @@
     <div class="container" id="appContainer">
         <!-- Library Panel (Slides from Left) -->
         <div class="library-panel" id="libraryPanel">
-            <div class="panel-header" onclick="toggleLibrary()">
-                <div id="t-lib-title">My Library</div>
-            </div>
-            <div style="padding: 10px 15px; border-bottom: 1px solid var(--border);">
-                <input type="text" id="libSearchInput" placeholder="Search books..." onkeyup="filterLibrary()" style="width: 100%; padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 0; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
+            <div class="panel-header">
+                <div id="t-lib-title" style="flex-shrink: 0; margin-right: 10px;">My Library</div>
+                <input type="text" id="libSearchInput" placeholder="Search..." onkeyup="filterLibrary()" 
+                    style="flex-grow: 1; min-width: 0; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
             </div>
             <div class="library-list" id="libraryList">
                 <div class="empty-lib">Loading...</div>
@@ -25,17 +24,22 @@
         <div class="main-card">
             <div class="resizer resizer-left" onmousedown="initResize(event, 'main-left')"></div>
             <div class="resizer resizer-right" onmousedown="initResize(event, 'main-right')"></div>
-            <div class="controls-left">
-                <button class="btn-icon" id="resetAllBtn" onclick="resetAllData()" title="Reset All Data">🧹</button>
+            <div class="main-toolbar">
+                <div class="controls-left">
+                    <button class="btn-icon" id="resetAllBtn" onclick="resetAllData()" title="Reset All Data">🧹</button>
+                </div>
+                <div class="folder-row">
+                    <span style="color: var(--muted);" id="t-save-path">Save to:</span>
+                    <span id="currentPath" class="current-path">...</span>
+                    <button onclick="chooseFolder()" id="btn-change-folder" class="folder-btn">Change</button>
+                </div>
+                <div class="controls">
+                    <button class="btn-icon" id="libBtn" onclick="toggleLibrary()" title="Library">📚</button>
+                    <button class="btn-icon" onclick="toggleLang()" id="langBtn">RU</button>
+                    <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
+                </div>
             </div>
-            <div class="controls">
-                <button class="btn-icon" id="libBtn" onclick="toggleLibrary()" title="Library">📚</button>
-                <button class="btn-icon" onclick="toggleLang()" id="langBtn">RU</button>
-                <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
-            </div>
-            <h1 id="t-title">SonicBook</h1>
-            <p id="t-subtitle" style="color: var(--muted); margin-bottom: 20px; font-size: 0.9rem;">Advanced Audiobook Downloader</p>
-            
+
             <input type="text" id="urlInput" placeholder="Paste link here...">
             
             <div class="options-group" id="optGroup">
@@ -44,18 +48,12 @@
                 <button class="opt-btn" id="mode-zip" onclick="setMode('zip')">ZIP (Split)</button>
             </div>
 
-            <div style="font-size: 0.8rem; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <span style="color: var(--muted);" id="t-save-path">Save to:</span>
-                <span id="currentPath" style="font-family: monospace; background: rgba(0,0,0,0.1); padding: 4px 8px; border-radius: 6px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
-                <button onclick="chooseFolder()" id="btn-change-folder" style="background: none; border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Change</button>
-            </div>
-
             <div id="chaptersBox" class="chapters-box">
-                <div style="font-weight: 600; margin-bottom: 10px; font-size: 0.85rem;" id="t-found">Chapters found:</div>
+                <div class="section-label" id="t-found">Chapters found:</div>
                 <div id="chaptersList"></div>
             </div>
 
-            <div id="status" style="margin-bottom: 10px; font-size: 0.85rem; display: none;"></div>
+            <div id="status" class="status-line"></div>
 
             <button id="mainBtn" onclick="handleAction()">Start Download</button>
 
@@ -66,10 +64,13 @@
                     <span id="frag">0/0</span>
                 </div>
             </div>
-            <a id="downloadLink" href="#" target="_blank">📥 Save Result</a>
 
             <!-- Player UI -->
             <div class="player-box" id="playerBox">
+                <div class="player-cover-frame" id="playerCoverFrame">
+                    <div class="player-cover-bg" id="playerCoverBg" aria-hidden="true"></div>
+                    <img id="playerCover" src="">
+                </div>
                 <div class="player-header">
                     <div class="player-title" id="playerTitle">Book Title</div>
                     <button class="player-chapter-btn" id="btn-player-chapters" onclick="toggleChaptersModal()">📑 Chapters</button>
@@ -77,9 +78,15 @@
                 <div class="player-chapter" id="playerChapter">Chapter 1</div>
 
                 <div class="player-controls">
-                    <button class="p-btn p-btn-small" onclick="seekRelative(-15)">⏪</button>
-                    <button class="p-btn" id="playBtn" onclick="togglePlay()">▶</button>
-                    <button class="p-btn p-btn-small" onclick="seekRelative(15)">⏩</button>
+                    <button class="p-btn p-btn-small" type="button" onclick="seekRelative(-15)" aria-label="Back 15 seconds" title="Back 15 seconds">
+                        <span class="player-icon player-icon-back" aria-hidden="true"></span>
+                    </button>
+                    <button class="p-btn" id="playBtn" type="button" onclick="togglePlay()" aria-label="Play" title="Play">
+                        <span class="player-icon player-icon-play" id="playBtnIcon" aria-hidden="true"></span>
+                    </button>
+                    <button class="p-btn p-btn-small" type="button" onclick="seekRelative(15)" aria-label="Forward 15 seconds" title="Forward 15 seconds">
+                        <span class="player-icon player-icon-forward" aria-hidden="true"></span>
+                    </button>
                 </div>
 
                 <div class="timeline-container" id="timeline" onclick="seek(event)">

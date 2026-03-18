@@ -5,6 +5,7 @@ import logging
 import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
+from urllib.parse import urljoin
 import config
 from processor import sanitize_filename
 
@@ -35,11 +36,32 @@ async def close_browser():
 
 def parse_time_to_seconds(time_str):
     try:
-        parts = value.split(":")
+        parts = time_str.split(":")
         if len(parts) == 2: return int(parts[0]) * 60 + int(parts[1])
         if len(parts) == 3: return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
     except: pass
     return 0
+
+def extract_cover_url(soup, page_url):
+    candidate_selectors = [
+        ("meta", {"property": "og:image"}, "content"),
+        ("meta", {"name": "twitter:image"}, "content"),
+        ("meta", {"name": "twitter:image:src"}, "content"),
+        ("img", {"itemprop": "image"}, "src"),
+        ("img", {"class": "book__cover"}, "src"),
+        ("img", {"class": "book_cover"}, "src"),
+    ]
+
+    for tag_name, attrs, attr_name in candidate_selectors:
+        tag = soup.find(tag_name, attrs=attrs)
+        if tag and tag.get(attr_name):
+            return urljoin(page_url, tag.get(attr_name))
+
+    fallback = soup.find("img", src=re.compile(r"/uploads/media/topic/"))
+    if fallback and fallback.get("src"):
+        return urljoin(page_url, fallback.get("src"))
+
+    return None
 
 def extract_chapters_from_html(html_content):
     soup = BeautifulSoup(html_content, "html.parser")
@@ -96,8 +118,8 @@ def extract_chapters_from_html(html_content):
 
 async def get_book_info(book_url):
     log_debug(f"Combined info scraping: {book_url}")
-    res = {"m3u8": None, "title": "audiobook", "chapters": []}
-    
+    res = {"m3u8": None, "title": "audiobook", "chapters": [], "cover": None}
+
     # 0. МАРШРУТИЗАТОР: Обработка специфичных сайтов (например, knigavuhe.org)
     if "knigavuhe.org" in book_url:
         log_debug("Detected knigavuhe.org, using dedicated fast parser...")
@@ -109,7 +131,9 @@ async def get_book_info(book_url):
                     soup = BeautifulSoup(resp.text, "html.parser")
                     h1 = soup.find("h1")
                     if h1: res["title"] = sanitize_filename(h1.get_text().strip())
-                    
+
+                    res["cover"] = extract_cover_url(soup, book_url)
+
                     # Ищем JSON со списком треков
                     match = re.search(r'\[\{.*?"title".*?"url".*?\}\]', resp.text)
                     if match:
@@ -131,10 +155,10 @@ async def get_book_info(book_url):
                         log_debug(f"Knigavuhe: Found {len(direct_urls)} tracks")
                         # Передаем список URL как строку, разделенную запятыми, с префиксом
                         res["m3u8"] = "DIRECT_URLS:" + ",".join(direct_urls)
-                        return res["m3u8"], res["title"], res["chapters"]
+                        return res["m3u8"], res["title"], res["chapters"], res["cover"]
         except Exception as e:
             log_debug(f"Knigavuhe parse error: {e}")
-            return None, "audiobook", []
+            return None, "audiobook", [], None
 
     # Text-based parsing (Fast) для остальных сайтов
     try:
@@ -150,6 +174,9 @@ async def get_book_info(book_url):
                 soup = BeautifulSoup(resp.text, "html.parser")
                 h1 = soup.find("h1")
                 if h1: res["title"] = h1.get_text().strip()
+                
+                res["cover"] = extract_cover_url(soup, book_url)
+                    
                 res["chapters"] = extract_chapters_from_html(resp.text)
     except Exception as e: log_debug(f"BS4 parse error: {e}")
 
@@ -326,4 +353,4 @@ async def get_book_info(book_url):
                 await browser.close()
     except Exception as e: log_debug(f"Playwright error: {e}")
 
-    return res["m3u8"], res["title"], res["chapters"]
+    return res["m3u8"], res["title"], res["chapters"], res["cover"]
