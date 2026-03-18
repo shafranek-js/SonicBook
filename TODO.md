@@ -30,5 +30,10 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   - Implement dynamic Play/Pause icon syncing in the library list.
 
 ## 🛠️ Technical Debt / Optimizations
-- [ ] **Playwright Optimization:** Use a persistent browser context instead of launching a new browser per request.
-- [ ] **State Management:** Migrate `progress_store` to Redis for multi-worker support.
+- [x] 1. **Async ZIP Extraction:** Fix event loop blocking in `main.py` by moving `zipfile.extractall` to a separate thread executor.
+- [x] 2. **Race Condition Protection:** Add `asyncio.Lock` for ZIP extraction to prevent filesystem corruption on concurrent requests.
+- [x] 3. **Frontend Componentization:** Extract CSS and JS from `index.html` into `static/style.css` and `static/app.js` for better maintainability and caching.
+- [x] 4. **Playwright Optimization:** Initialize a single persistent browser context in FastAPI `lifespan` instead of launching a new one per request.
+- [x] 5. **Subprocess Timeouts:** Add strict `asyncio.wait_for` timeouts to `yt-dlp` and `ffmpeg` execution to prevent memory/process leaks on network hangs.
+- [x] 6. **Modernize Progress Delivery:** Replace polling (`setInterval`) with Server-Sent Events (SSE) or WebSockets for real-time progress updates without DDoS-ing the server.
+- [ ] 7. **State Management:** Migrate `progress_store` to Redis for multi-worker support (Optional/Advanced).

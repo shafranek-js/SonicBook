@@ -13,7 +13,27 @@ logger = logging.getLogger(__name__)
 def log_debug(message):
     logger.info(message)
 
-def parse_time_to_seconds(value: str) -> int:
+# Persistent Playwright browser instance
+playwright_instance = None
+browser_instance = None
+
+async def init_browser():
+    global playwright_instance, browser_instance
+    if not playwright_instance:
+        log_debug("Initializing persistent Playwright browser...")
+        playwright_instance = await async_playwright().start()
+        browser_instance = await playwright_instance.chromium.launch(headless=True)
+
+async def close_browser():
+    global playwright_instance, browser_instance
+    if browser_instance:
+        await browser_instance.close()
+    if playwright_instance:
+        await playwright_instance.stop()
+    playwright_instance = None
+    browser_instance = None
+
+def parse_time_to_seconds(time_str):
     try:
         parts = value.split(":")
         if len(parts) == 2: return int(parts[0]) * 60 + int(parts[1])
@@ -135,9 +155,10 @@ async def get_book_info(book_url):
 
     # Browser-based parsing (for m3u8)
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+        if browser_instance:
+            log_debug("Using persistent Playwright browser instance")
+            context = await browser_instance.new_context()
+            page = await context.new_page()
             
             # Блокируем только картинки и медиа для скорости (оставляем CSS, так как он может быть нужен плееру)
             await page.route("**/*.{png,jpg,jpeg,svg,woff,woff2,ico}", lambda route: route.abort())
@@ -217,7 +238,92 @@ async def get_book_info(book_url):
             if not res["chapters"] and res["title"] != "audiobook":
                 res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
 
-            await browser.close()
+            await context.close()
+        else:
+            log_debug("Persistent browser not found, launching temporary instance...")
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                
+                # Блокируем только картинки и медиа для скорости (оставляем CSS, так как он может быть нужен плееру)
+                await page.route("**/*.{png,jpg,jpeg,svg,woff,woff2,ico}", lambda route: route.abort())
+                page.on("request", lambda r: res.update({"m3u8": r.url}) if ".m3u8" in r.url else None)
+                
+                await page.goto(book_url, wait_until="domcontentloaded", timeout=30000)
+                
+                for _ in range(15):
+                    if res["m3u8"]: break
+                    if _ == 5:
+                        try:
+                            # Агрессивный клик через JS работает надежнее
+                            await page.evaluate("document.querySelector('.button__player--play, .js-player-play')?.click()")
+                            log_debug("Play clicked via JS")
+                        except: pass
+                    await asyncio.sleep(1)
+
+                if not res["chapters"]:
+                    log_debug("BS4 chapters empty, parsing DOM elements...")
+                    res["chapters"] = await page.evaluate("""() => {
+                        let items = [];
+                        
+                        // 1. Try standard akniga layout (.ls-item)
+                        let standardItems = document.querySelectorAll('.ls-item');
+                        if (standardItems.length > 0) {
+                            standardItems.forEach(el => {
+                                let titleEl = el.querySelector('.ls-title');
+                                if (titleEl) {
+                                    items.push({
+                                        title: titleEl.innerText.trim(),
+                                        start: parseFloat(el.getAttribute('data-time') || 0),
+                                        end: 0
+                                    });
+                                }
+                            });
+                        }
+                        
+                        // 2. Try old/alternative akniga layout (.chapter__default)
+                        if (items.length === 0) {
+                            let oldItems = document.querySelectorAll('.chapter__default');
+                            if (oldItems.length > 0) {
+                                oldItems.forEach(el => {
+                                    let titleEl = el.querySelector('.chapter__default--title');
+                                    let pos = el.getAttribute('data-pos');
+                                    if (titleEl && pos !== null) {
+                                        items.push({
+                                            title: titleEl.innerText.trim(),
+                                            start: parseFloat(pos),
+                                            end: 0
+                                        });
+                                    }
+                                });
+                            }
+                        }
+
+                        // 3. Post-process to set 'end' times
+                        for (let i = 0; i < items.length; i++) {
+                            if (i < items.length - 1) {
+                                items[i].end = items[i+1].start;
+                            }
+                        }
+
+                        // 4. Try Global JS Variables (highest priority if found)
+                        let jsData = window.items || window.playlist || window.free_playlist;
+                        if (jsData && Array.isArray(jsData) && jsData.length > 0) {
+                            return jsData.map(i => ({
+                                title: i.title || i.name || "Chapter", 
+                                start: parseFloat(i.time_from_start || i.start || 0), 
+                                end: parseFloat(i.time_finish || i.end || 0)
+                            }));
+                        }
+                        
+                        return items;
+                    }""")
+                    log_debug(f"DOM parsing found {len(res['chapters'])} chapters")
+                
+                if not res["chapters"] and res["title"] != "audiobook":
+                    res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
+
+                await browser.close()
     except Exception as e: log_debug(f"Playwright error: {e}")
 
     return res["m3u8"], res["title"], res["chapters"]

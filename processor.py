@@ -59,7 +59,12 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id):
     ]
     
     process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    stdout, stderr = await process.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=3600)
+    except asyncio.TimeoutError:
+        process.kill()
+        log_debug(f"FFmpeg timeout (1 hour) assembling M4B for {task_id}")
+        return None
     
     if process.returncode != 0:
         log_debug(f"FFmpeg Error (code {process.returncode}): {stderr.decode(errors='replace')}")
@@ -92,7 +97,12 @@ async def split_to_chapters(source_file, chapters, title_base, task_id, source_e
         
         cmd = [config.FFMPEG_PATH, "-y", "-ss", str(ch['start']), "-t", str(dur), "-i", source_file, "-c", "copy", temp_out]
         p = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        await p.wait()
+        try:
+            await asyncio.wait_for(p.wait(), timeout=600)
+        except asyncio.TimeoutError:
+            p.kill()
+            log_debug(f"FFmpeg timeout (10 mins) splitting chapter {i}")
+            continue
         
         # Переименовываем в красивое название средствами Python
         nice_name = sanitize_filename(f"{i+1:03d} - {ch['title']}") + ext
@@ -262,7 +272,11 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                 log_debug(f"yt-dlp Python API error: {e}")
                 return False
 
-        success = await current_loop.run_in_executor(None, download_with_ytdlp)
+        try:
+            success = await asyncio.wait_for(current_loop.run_in_executor(None, download_with_ytdlp), timeout=14400) # 4 hours max
+        except asyncio.TimeoutError:
+            log_debug(f"yt-dlp download timeout (4 hours) for {task_id}")
+            success = False
         
         if not success:
             return None

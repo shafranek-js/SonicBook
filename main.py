@@ -6,8 +6,9 @@ import logging
 from contextlib import asynccontextmanager
 import uvicorn
 import aiofiles
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import config
@@ -28,6 +29,9 @@ logger = logging.getLogger(__name__)
 # In-memory progress tracking
 # task_id -> {status, percent, current_frag, total_frags, file_name, timestamp}
 progress_store = {}
+
+# Locks for async operations
+zip_extraction_locks = {}
 
 class InfoRequest(BaseModel):
     url: str
@@ -56,10 +60,15 @@ async def cleanup_task():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(cleanup_task())
+    await scraper.init_browser()
     yield
     task.cancel()
+    await scraper.close_browser()
 
 app = FastAPI(title="SonicBook", lifespan=lifespan)
+
+# Mount static files (CSS, JS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -149,6 +158,33 @@ async def process_book(task_id, url, mode):
 @app.get("/api/progress/{task_id}")
 async def get_progress(task_id: str):
     return progress_store.get(task_id, {"status": "not_found"})
+
+@app.get("/api/progress/stream/{task_id}")
+async def progress_stream(task_id: str, request: Request):
+    async def event_generator():
+        last_percent = -1
+        last_status = None
+        while True:
+            if await request.is_disconnected():
+                break
+                
+            data = progress_store.get(task_id, {"status": "not_found"})
+            
+            # Only send update if something changed
+            if data.get("percent") != last_percent or data.get("status") != last_status:
+                last_percent = data.get("percent", -1)
+                last_status = data.get("status")
+                import json
+                yield f"data: {json.dumps(data)}\n\n"
+            
+            if data.get("status") in ["success", "error", "not_found"]:
+                # Send one final update just to be sure, then stop stream
+                yield f"data: {json.dumps(data)}\n\n"
+                break
+                
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/api/library")
 async def get_library():
