@@ -13,6 +13,9 @@
             <div class="panel-header" onclick="toggleLibrary()">
                 <div id="t-lib-title">My Library</div>
             </div>
+            <div style="padding: 10px 15px; border-bottom: 1px solid var(--border);">
+                <input type="text" id="libSearchInput" placeholder="Search books..." onkeyup="filterLibrary()" style="width: 100%; padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; margin-bottom: 0; border: 1px solid var(--border); background: var(--bg); color: var(--text);">
+            </div>
             <div class="library-list" id="libraryList">
                 <div class="empty-lib">Loading...</div>
             </div>

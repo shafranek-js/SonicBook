@@ -29,7 +29,14 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   - Add UI state persistence across page reloads (open panels, last book, mode).
   - Implement dynamic Play/Pause icon syncing in the library list.
 
-## 🛠️ Technical Debt / Optimizations
+## ✨ Version 1.1 Features (Polishing & UX)
+- [x] 1. **Library Search:** Add a real-time JS-based search input to the "My Library" panel to quickly filter downloaded books.
+- [ ] 2. **Book Covers:**
+  - Update `scraper.py` to extract the high-resolution cover image URL.
+  - Update `processor.py` to download and save the cover as `[book_name].jpg`.
+  - Update the UI to display the cover image cleanly below or alongside the central player.
+- [ ] 3. **Keyboard Shortcuts:** Add global hotkeys (Space for Play/Pause, Left/Right arrows for 15s seek).
+- [ ] 4. **Media Session API:** Integrate `navigator.mediaSession` to allow users to control playback from their OS media widget, lock screen, or physical media keys, complete with metadata (title, artist, cover art).
 - [x] 1. **Async ZIP Extraction:** Fix event loop blocking in `main.py` by moving `zipfile.extractall` to a separate thread executor.
 - [x] 2. **Race Condition Protection:** Add `asyncio.Lock` for ZIP extraction to prevent filesystem corruption on concurrent requests.
 - [x] 3. **Frontend Componentization:** Extract CSS and JS from `index.html` into `static/style.css` and `static/app.js` for better maintainability and caching.

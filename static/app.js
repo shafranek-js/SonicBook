@@ -403,6 +403,25 @@ const i18n = {
             }
         }
 
+        function filterLibrary() {
+            const input = document.getElementById('libSearchInput');
+            const filter = input.value.toLowerCase();
+            const listDiv = document.getElementById('libraryList');
+            const items = listDiv.getElementsByClassName('library-item');
+
+            for (let i = 0; i < items.length; i++) {
+                const titleEl = items[i].querySelector('.library-item-title');
+                if (titleEl) {
+                    const txtValue = titleEl.textContent || titleEl.innerText;
+                    if (txtValue.toLowerCase().indexOf(filter) > -1) {
+                        items[i].style.display = "";
+                    } else {
+                        items[i].style.display = "none";
+                    }
+                }       
+            }
+        }
+
         async function startDownload() {
             const url = document.getElementById('urlInput').value.trim();
             if(!url) return;
