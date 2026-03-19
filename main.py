@@ -175,12 +175,13 @@ async def process_book(task_id, url, mode):
             progress_service.update_progress_entry(task_id, status="error")
             return
 
-        progress_service.update_progress_entry(task_id, status="processing")
+        progress_service.update_progress_entry(task_id, status="processing", phase="downloading", percent=0.0)
 
         # Define callback for progress
-        async def update_progress(pct, curr, total, status=None):
+        async def update_progress(pct, curr, total, status=None, phase=None):
             fields = {}
             if status is not None: fields["status"] = status
+            if phase is not None: fields["phase"] = phase
             if pct is not None: fields["percent"] = pct
             if curr is not None: fields["current_frag"] = curr
             if total is not None: fields["total_frags"] = total
@@ -196,6 +197,7 @@ async def process_book(task_id, url, mode):
             progress_service.update_progress_entry(
                 task_id,
                 status="success",
+                phase="complete",
                 percent=100.0,
                 file_name=final_file
             )

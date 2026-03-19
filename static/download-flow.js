@@ -7,6 +7,31 @@ function getValidatedBookUrl() {
     return url;
 }
 
+function setProgressPhase(phase, percent = 0, current = 0, total = 0) {
+    const t = i18n[appState.currentLang];
+    const phaseEl = document.getElementById('progressPhase');
+    const box = document.getElementById('pbox');
+    const bar = document.getElementById('bar');
+    const perc = document.getElementById('perc');
+    const frag = document.getElementById('frag');
+
+    if (phaseEl) {
+        phaseEl.innerText = phase === 'assembling' ? t.progressAssembling : t.progressDownloading;
+    }
+
+    box.dataset.phase = phase;
+    box.classList.toggle('merging-mode', phase === 'downloading');
+    box.classList.toggle('assembling-mode', phase === 'assembling');
+    bar.style.width = `${Math.max(0, Math.min(100, percent || 0))}%`;
+    perc.innerText = `${(percent || 0).toFixed(3)}%`;
+
+    if (total > 0) {
+        frag.innerText = `${current || 0}/${total}`;
+    } else {
+        frag.innerText = phase === 'assembling' ? '...' : '0/0';
+    }
+}
+
 async function handleAction() {
     if (appState.step === 'start') {
         if (appState.currentMode === 'm4b' || appState.currentMode === 'zip') {
@@ -29,6 +54,7 @@ function handleSecondaryAction() {
     appState.showPreview = false;
     appState.previewLoading = false;
     appState.showProgress = false;
+    appState.mainButtonLabelOverride = '';
     setChaptersPanelOpen(!!appState.playerReturnState.panelOpen);
     appState.playerReturnState = null;
     appState.step = 'done';
@@ -41,6 +67,7 @@ function resetForm({ preservePlayer = false } = {}) {
     appState.showProgress = false;
     appState.showPreview = false;
     appState.previewLoading = false;
+    appState.mainButtonLabelOverride = '';
     clearStatusMessage();
     const container = document.getElementById('appContainer');
     const canPreservePlayer = preservePlayer && playerState.fileName && appState.showPlayer;
@@ -104,6 +131,7 @@ async function fetchInfo() {
             setStatusMessage(i18n[appState.currentLang].noChapters, 'info');
         }
         if (data.cover) playerState.tempCoverUrl = data.cover;
+        appState.mainButtonLabelOverride = '';
         appState.step = 'confirm';
         updateUI();
     } catch (e) {
@@ -121,8 +149,8 @@ async function startDownload() {
     if (!url) return;
     document.getElementById('mainBtn').disabled = true;
     appState.showProgress = true;
-    document.getElementById('pbox').classList.remove('merging-mode');
     updateUI();
+    setProgressPhase('downloading', 0, 0, 0);
     setStatusMessage(i18n[appState.currentLang].statusInit, 'info');
     try {
         const res = await fetch('/api/download', {
@@ -144,6 +172,7 @@ async function startDownload() {
         poll(data.task_id);
     } catch (e) {
         appState.showProgress = false;
+        appState.mainButtonLabelOverride = '';
         setStatusMessage('Error: ' + e.message, 'error');
         document.getElementById('mainBtn').disabled = false;
         updateUI();
@@ -156,34 +185,26 @@ function poll(id) {
         const data = JSON.parse(event.data), t = i18n[appState.currentLang];
         if (data.status === 'processing' || data.status === 'merging') {
             setStatusMessage(data.status === 'merging' ? t.statusMerging : t.statusStreams, 'info');
-            if (data.status === 'merging') document.getElementById('pbox').classList.add('merging-mode');
-            document.getElementById('pbox').classList.remove('assembling-mode');
-            document.getElementById('bar').style.width = data.percent + '%';
-            document.getElementById('perc').innerText = data.percent.toFixed(3) + '%';
-            document.getElementById('frag').innerText = `${data.current_frag}/${data.total_frags}`;
+            setProgressPhase(data.phase || 'downloading', data.percent || 0, data.current_frag || 0, data.total_frags || 0);
         } else if (data.status === 'assembling') {
             setStatusMessage(t.assemblingStatus, 'info');
-            document.getElementById('pbox').classList.add('assembling-mode');
-            document.getElementById('bar').style.width = '100%';
-            document.getElementById('perc').innerText = '100.000%';
+            setProgressPhase('assembling', data.percent || 0, data.current_frag || 0, data.total_frags || 0);
         } else if (data.status === 'success') {
             eventSource.close();
             setStatusMessage(t.statusDone, 'success');
             appState.showProgress = false;
-            document.getElementById('pbox').classList.remove('assembling-mode');
-            document.getElementById('bar').style.width = '100%';
-            document.getElementById('perc').innerText = '100.000%';
+            setProgressPhase(data.phase || 'assembling', data.percent || 100, data.current_frag || 0, data.total_frags || 0);
             document.getElementById('mainBtn').disabled = false;
-            document.getElementById('mainBtn').innerText = t.btnAgain;
+            appState.mainButtonLabelOverride = '';
             appState.step = 'done';
             updateUI();
             initPlayer(data.file_name);
         } else if (data.status === 'error' || data.status === 'not_found') {
             eventSource.close();
             appState.showProgress = false;
+            appState.mainButtonLabelOverride = t.btnRetry;
             setStatusMessage('Error occurred', 'error');
             document.getElementById('mainBtn').disabled = false;
-            document.getElementById('mainBtn').innerText = 'Try Again';
             updateUI();
         }
     };

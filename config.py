@@ -6,6 +6,7 @@ import shutil
 # Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
+WORK_DIR = os.path.join(BASE_DIR, ".sonicbook-work")
 
 def load_downloads_dir():
     try:
@@ -76,3 +77,7 @@ STORE_EXPIRE_SECONDS = 7200 # Clear progress info after 2 hours
 # Ensure downloads directory exists
 if not os.path.exists(DOWNLOADS_DIR):
     os.makedirs(DOWNLOADS_DIR)
+
+# Ensure local staging/work directory exists
+if not os.path.exists(WORK_DIR):
+    os.makedirs(WORK_DIR)

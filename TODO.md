@@ -107,3 +107,22 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   Make `updateUI()` the main source of truth for center-panel visibility so `step` is not split across direct `style.display` mutations in the download and player-return flows.
 - [x] 7. **Chapter Panel Event Delegation (`static/player-ui.js`):**
   Replace inline `onclick` handlers in the player chapter list with `data-*` attributes plus a single delegated click handler on `#playerChaptersList`.
+
+## Progress UX
+
+- [x] 8. **Split Download Progress Into Distinct Stages:**
+  Replace the old 0-95 download scale with explicit `Downloading` and `Assembling` phases so the UI no longer jumps from ~94% straight into a wait state.
+- [x] 9. **Report Real Assembly Progress Where Available:**
+  Emit honest assembly progress for ZIP chapter splitting and M4B creation instead of a fake instant jump to 100%.
+
+## Remaining Frontend State Cleanup
+
+- [x] 10. **Render Status/Idle/Toolbar Strictly From `appState`:**
+  Move status visibility/text/tone and main toolbar action rendering fully behind `updateUI()` so flow functions mutate state only and no longer write those DOM branches directly.
+
+## Download Staging
+
+- [x] 11. **Stage Downloads Locally Before Library Move:**
+  Download fragments, `.part/.ytdl`, concat lists, and intermediate audio files into a local app-owned work directory instead of writing them directly into the user library path.
+- [x] 12. **Move Only Completed Artifacts Into Library:**
+  After successful assembly, move the final audio/zip file plus sidecar JSON and cover image from local staging into `DOWNLOADS_DIR`.

@@ -354,7 +354,6 @@ async function initPlayer(fileName, autoOpenChapters = false) {
     }
     updateMediaSession();
     syncMainSurfaceState();
-    syncIdleState();
 }
 
 function updateMediaSession() {

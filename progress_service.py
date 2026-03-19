@@ -8,6 +8,7 @@ terminal_progress_statuses = {"success", "error", "not_found"}
 def create_progress_entry() -> dict:
     return {
         "status": "searching",
+        "phase": "searching",
         "percent": 0.0,
         "current_frag": 0,
         "total_frags": 0,

@@ -15,6 +15,13 @@ logger = logging.getLogger(__name__)
 def log_debug(message):
     logger.info(message)
 
+def parse_ffmpeg_out_time(value):
+    try:
+        hours, minutes, seconds = value.strip().split(":")
+        return (int(hours) * 3600) + (int(minutes) * 60) + float(seconds)
+    except Exception:
+        return 0.0
+
 async def get_stream_duration(m3u8_url):
     try:
         cmd = [config.FFPROBE_PATH, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", m3u8_url]
@@ -24,6 +31,57 @@ async def get_stream_duration(m3u8_url):
     except Exception as e:
         log_debug(f"Failed to get stream duration: {e}")
         return 0
+
+async def get_media_duration(media_path):
+    try:
+        cmd = [config.FFPROBE_PATH, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", media_path]
+        process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=15)
+        return float(stdout.decode().strip())
+    except Exception as e:
+        log_debug(f"Failed to get media duration for {media_path}: {e}")
+        return 0
+
+async def run_ffmpeg_with_progress(cmd, duration_seconds, progress_callback=None, timeout=3600):
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+
+    stderr_chunks = []
+
+    async def read_progress():
+        last_reported = -1.0
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            text = line.decode(errors="replace").strip()
+            if not text:
+                continue
+            if text.startswith("out_time=") and duration_seconds > 0 and progress_callback is not None:
+                out_seconds = parse_ffmpeg_out_time(text.split("=", 1)[1])
+                percent = max(0.0, min(100.0, round((out_seconds / duration_seconds) * 100.0, 3)))
+                if percent > last_reported:
+                    last_reported = percent
+                    await progress_callback(percent)
+
+    async def read_stderr():
+        while True:
+            chunk = await process.stderr.read(8192)
+            if not chunk:
+                break
+            stderr_chunks.append(chunk)
+
+    try:
+        await asyncio.wait_for(asyncio.gather(read_progress(), read_stderr(), process.wait()), timeout=timeout)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        return None, b"".join(stderr_chunks), True
+
+    return process.returncode, b"".join(stderr_chunks), False
 
 def sanitize_filename(name):
     import string
@@ -47,10 +105,29 @@ def resolve_cover_extension(cover_url, content_type):
 
     return ".jpg"
 
-async def create_m4b_with_chapters(source_file, chapters, title_base, task_id, cover_path=None):
+def prepare_task_work_dir(task_id):
+    task_dir = os.path.join(config.WORK_DIR, task_id)
+    if os.path.exists(task_dir):
+        shutil.rmtree(task_dir, ignore_errors=True)
+    os.makedirs(task_dir, exist_ok=True)
+    return task_dir
+
+def move_to_library(src_path, dest_name):
+    if not src_path or not os.path.exists(src_path):
+        return None
+
+    dest_path = os.path.join(config.DOWNLOADS_DIR, dest_name)
+    if os.path.exists(dest_path):
+        if os.path.isdir(dest_path):
+            shutil.rmtree(dest_path)
+        else:
+            os.remove(dest_path)
+    return shutil.move(src_path, dest_path)
+
+async def create_m4b_with_chapters(source_file, chapters, title_base, task_id, work_dir, cover_path=None, progress_callback=None):
     """Исправлено: Использование нейтральных имен для FFmpeg во избежание ошибок кодировки"""
     log_debug(f"M4B assembly for task {task_id}...")
-    meta_path = os.path.join(config.DOWNLOADS_DIR, f"meta_{task_id}.txt")
+    meta_path = os.path.join(work_dir, f"meta_{task_id}.txt")
     
     meta_content = ";FFMETADATA1\ntitle=" + title_base + "\n"
     for i, ch in enumerate(chapters):
@@ -67,10 +144,10 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id, c
         await f.write(meta_content)
     
     # Нейтральное имя для сборки
-    temp_m4b = os.path.join(config.DOWNLOADS_DIR, f"out_{task_id}.m4b")
+    temp_m4b = os.path.join(work_dir, f"out_{task_id}.m4b")
     
     cmd = [
-        config.FFMPEG_PATH, "-y", "-i", source_file, "-i", meta_path
+        config.FFMPEG_PATH, "-y", "-progress", "pipe:1", "-nostats", "-i", source_file, "-i", meta_path
     ]
     
     if cover_path and os.path.exists(cover_path):
@@ -80,32 +157,25 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id, c
         
     cmd.extend(["-map_metadata", "1", temp_m4b])
     
-    process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=3600)
-    except asyncio.TimeoutError:
-        process.kill()
+    source_duration = await get_media_duration(source_file)
+    returncode, stderr, timed_out = await run_ffmpeg_with_progress(cmd, source_duration, progress_callback, timeout=3600)
+    if timed_out:
         log_debug(f"FFmpeg timeout (1 hour) assembling M4B for {task_id}")
         return None
     
-    if process.returncode != 0:
-        log_debug(f"FFmpeg Error (code {process.returncode}): {stderr.decode(errors='replace')}")
+    if returncode != 0:
+        log_debug(f"FFmpeg Error (code {returncode}): {stderr.decode(errors='replace')}")
     
     if os.path.exists(meta_path): os.remove(meta_path)
     
     # Переименовываем в красивое название после сборки
-    final_filename = f"{title_base}.m4b"
-    final_path = os.path.join(config.DOWNLOADS_DIR, final_filename)
-    
     if os.path.exists(temp_m4b):
-        if os.path.exists(final_path): os.remove(final_path)
-        os.rename(temp_m4b, final_path)
-        return final_filename
+        return temp_m4b
     return None
 
-async def split_to_chapters(source_file, chapters, title_base, task_id, source_ext):
+async def split_to_chapters(source_file, chapters, title_base, task_id, work_dir, source_ext, progress_callback=None):
     log_debug(f"Fast splitting into {len(chapters)} files...")
-    temp_dir = os.path.join(config.DOWNLOADS_DIR, f"split_{task_id}")
+    temp_dir = os.path.join(work_dir, f"split_{task_id}")
     os.makedirs(temp_dir, exist_ok=True)
     
     split_files = []
@@ -132,14 +202,19 @@ async def split_to_chapters(source_file, chapters, title_base, task_id, source_e
         if os.path.exists(temp_out):
             os.rename(temp_out, nice_path)
             split_files.append(nice_path)
-    
+            if progress_callback is not None:
+                percent = round(((i + 1) / len(chapters)) * 100.0, 3)
+                await progress_callback(percent, i + 1, len(chapters))
+
     zip_name = f"{title_base}.zip"
-    zip_path = os.path.join(config.DOWNLOADS_DIR, zip_name)
+    zip_path = os.path.join(work_dir, zip_name)
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as z:
         for f in split_files:
             z.write(f, os.path.basename(f))
+    if progress_callback is not None and chapters:
+        await progress_callback(100.0, len(chapters), len(chapters))
     shutil.rmtree(temp_dir)
-    return zip_name
+    return zip_path
 
 async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
     """Кастомный параллельный загрузчик для прямых MP3 ссылок с защитой от обрывов"""
@@ -160,8 +235,8 @@ async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
                         async for chunk in response.aiter_bytes():
                             await f.write(chunk)
                 downloaded += 1
-                percent = round((downloaded / total_files) * 95.0, 3)
-                await progress_callback(percent, downloaded, total_files)
+                percent = round((downloaded / total_files) * 100.0, 3)
+                await progress_callback(percent, downloaded, total_files, phase="downloading")
                 return file_path
             except Exception as e:
                 log_debug(f"Chunk {index} failed (attempt {attempt+1}/{retries}): {e}")
@@ -191,7 +266,7 @@ async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
             await f.write(f"file '{safe_path}'\n")
             
     # Склеиваем всё в один файл
-    merged_file = os.path.join(config.DOWNLOADS_DIR, f"merged_{task_id}.mp3")
+    merged_file = os.path.join(os.path.dirname(temp_dir), f"merged_{task_id}.mp3")
     cmd = [
         config.FFMPEG_PATH, "-y", "-f", "concat", "-safe", "0",
         "-i", list_file, "-c", "copy", merged_file
@@ -205,18 +280,25 @@ async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
 
 async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progress_callback, cover_url=None, source_url=None):
     total_frags = 0
+    task_work_dir = prepare_task_work_dir(task_id)
+    source = ""
+    source_ext = ""
+    cover_path = None
+
+    async def report_assembly_progress(percent, current=None, total=None):
+        await progress_callback(percent, current, total, status="assembling", phase="assembling")
 
     # ПРОВЕРКА НА ПРЯМЫЕ ССЫЛКИ
     if m3u8_url.startswith("DIRECT_URLS:"):
         urls = m3u8_url.replace("DIRECT_URLS:", "").split(",")
         total_frags = len(urls)
-        temp_dir = os.path.join(config.DOWNLOADS_DIR, f"dl_dir_{task_id}")
+        temp_dir = os.path.join(task_work_dir, "direct-download")
         source = await download_direct_urls(urls, temp_dir, task_id, progress_callback)
         if not source: return None
         source_ext = ".mp3"
     else:
         # СТАНДАРТНАЯ ЗАГРУЗКА ЧЕРЕЗ YT-DLP API
-        temp_base = os.path.join(config.DOWNLOADS_DIR, f"dl_{task_id}")
+        temp_base = os.path.join(task_work_dir, f"dl_{task_id}")
         
         # Получаем общее количество фрагментов, если это возможно, для fallback-расчетов
         try:
@@ -253,14 +335,14 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                     # Пытаемся получить прогресс по байтам (самый точный метод)
                     total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
                     if total_bytes > 0 and d.get('downloaded_bytes'):
-                        percent = round((d['downloaded_bytes'] / total_bytes) * 95.0, 3)
+                        percent = round((d['downloaded_bytes'] / total_bytes) * 100.0, 3)
                     
                     # Fallback на парсинг строки процентов (убираем ~, ANSI-коды и прочий мусор)
                     if percent is None and '_percent_str' in d:
                         try:
                             match = re.search(r'([0-9]+\.[0-9]+|[0-9]+)', d['_percent_str'])
                             if match:
-                                percent = min(95.0, float(match.group(1)) * 0.95)
+                                percent = min(100.0, float(match.group(1)))
                         except Exception as e:
                             log_debug(f"Percent string parse error: {e}")
 
@@ -273,7 +355,7 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                     if percent is not None or curr_frag is not None:
                         try:
                             asyncio.run_coroutine_threadsafe(
-                                progress_callback(percent, curr_frag, total), 
+                                progress_callback(percent, curr_frag, total, phase="downloading"), 
                                 current_loop
                             )
                         except Exception as e:
@@ -305,8 +387,9 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
         
         if not success:
             return None
+
+        await progress_callback(100.0, total_frags, total_frags, phase="downloading")
             
-        source = ""; source_ext = ""
         for ext in ['.mp4', '.m4a', '.mp3']:
             if os.path.exists(temp_base + ext): 
                 source = temp_base + ext
@@ -314,14 +397,13 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                 break
 
     # Download cover if provided
-    cover_path = None
     if cover_url:
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.get(cover_url, follow_redirects=True, timeout=30)
                 if r.status_code == 200 and r.headers.get("content-type", "").lower().startswith("image/"):
                     c_ext = resolve_cover_extension(cover_url, r.headers.get("content-type"))
-                    cover_path = os.path.join(config.DOWNLOADS_DIR, f"{title_base}{c_ext}")
+                    cover_path = os.path.join(task_work_dir, f"{title_base}{c_ext}")
                     async with aiofiles.open(cover_path, 'wb') as f:
                         await f.write(r.content)
                 else:
@@ -333,25 +415,31 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
     # ФИНАЛЬНАЯ СБОРКА И НАРЕЗКА (ОБЩАЯ ДЛЯ ОБОИХ МЕТОДОВ)
     try:
         if source:
-            await progress_callback(100.0, total_frags, total_frags, status="assembling")
-            
             final_file = ""
+            final_source_path = ""
             if mode == "zip" and chapters:
-                final_file = await split_to_chapters(source, chapters, title_base, task_id, source_ext)
+                await report_assembly_progress(0.0, 0, len(chapters))
+                final_source_path = await split_to_chapters(source, chapters, title_base, task_id, task_work_dir, source_ext, report_assembly_progress)
+                final_file = f"{title_base}.zip"
             elif mode == "m4b" and chapters:
-                final_file = await create_m4b_with_chapters(source, chapters, title_base, task_id, cover_path)
+                await report_assembly_progress(0.0, 0, 100)
+                final_source_path = await create_m4b_with_chapters(source, chapters, title_base, task_id, task_work_dir, cover_path, lambda pct: report_assembly_progress(pct, round(pct), 100))
+                final_file = f"{title_base}.m4b"
             else:
                 final_file = f"{title_base}{source_ext}"
-                dest = os.path.join(config.DOWNLOADS_DIR, final_file)
-                if os.path.exists(dest): os.remove(dest)
-                os.rename(source, dest)
-            
-            if os.path.exists(source): os.remove(source)
+                final_source_path = source
+
+            if not final_source_path or not os.path.exists(final_source_path):
+                return None
+
+            move_to_library(final_source_path, final_file)
+            if os.path.exists(source) and os.path.abspath(source) != os.path.abspath(final_source_path):
+                os.remove(source)
 
             # Generate JSON metadata for the integrated web player
             try:
                 import json
-                meta_json_path = os.path.join(config.DOWNLOADS_DIR, f"{title_base}.json")
+                staged_meta_json_path = os.path.join(task_work_dir, f"{title_base}.json")
                 meta_data = {
                     "title": title_base,
                     "mode": mode,
@@ -361,10 +449,16 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                     "cover_url": cover_url,
                     "local_cover": os.path.basename(cover_path) if cover_path else None
                 }
-                async with aiofiles.open(meta_json_path, "w", encoding="utf-8") as f:
+                async with aiofiles.open(staged_meta_json_path, "w", encoding="utf-8") as f:
                     await f.write(json.dumps(meta_data, ensure_ascii=False, indent=2))
+                move_to_library(staged_meta_json_path, f"{title_base}.json")
             except Exception as meta_e:
                 log_debug(f"Failed to write metadata JSON: {meta_e}")
+
+            if cover_path and os.path.exists(cover_path):
+                move_to_library(cover_path, os.path.basename(cover_path))
+
+            shutil.rmtree(task_work_dir, ignore_errors=True)
 
             return final_file
         return None

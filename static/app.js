@@ -1,7 +1,7 @@
 const i18n = {
     en: {
         placeholder: "Paste link here...",
-        btnStart: "Start Download", btnFetch: "Fetch Info", btnConfirm: "Confirm & Download", btnAgain: "Download Another",
+        btnStart: "Start Download", btnFetch: "Fetch Info", btnConfirm: "Confirm & Download", btnAgain: "Download Another", btnRetry: "Try Again",
         btnBackToPlayer: "Back to Player",
         statusInit: "Initializing...", statusStreams: "Downloading...", statusMerging: "Finalizing & Metadata...",
         statusDone: "Ready!", found: "Chapters found:", noChapters: "No chapters found. Will download as single file.",
@@ -24,7 +24,9 @@ const i18n = {
         dropKicker: "Drop Here", dropLinkTitle: "Drop a link to start", dropLinkSubtitle: "Paste or drop a supported audiobook page URL.",
         dropFilesTitle: "Local file import is not ready", dropFilesSubtitle: "Drop a book page link instead of audio files for now.",
         dropUnsupportedTitle: "Unsupported drop content", dropUnsupportedSubtitle: "Try dropping an http(s) page link.",
-        loadingDialog: "Loading dialog...", assemblingStatus: "⚙️ Assembling M4B... Please wait",
+        loadingDialog: "Loading dialog...", assemblingStatus: "⚙️ Assembling files... Please wait",
+        progressDownloading: "Downloading",
+        progressAssembling: "Assembling",
         libTooltip: "Library", themeTooltip: "Theme", langTooltip: "Language", settingsTooltip: "Settings", settingsTitle: "Settings", clearAllDataBtn: "Clear all app data & cache", languageLabel: "Language", downloadAnotherTooltip: "Download another",
         chaptersTooltip: "Show or hide chapter list",
         chapterCountShort: "ch",
@@ -33,7 +35,7 @@ const i18n = {
     },
     ru: {
         placeholder: "Вставьте ссылку...",
-        btnStart: "Начать загрузку", btnFetch: "Найти главы", btnConfirm: "Подтвердить и скачать", btnAgain: "Загрузить еще одну",
+        btnStart: "Начать загрузку", btnFetch: "Найти главы", btnConfirm: "Подтвердить и скачать", btnAgain: "Загрузить еще одну", btnRetry: "Попробовать снова",
         btnBackToPlayer: "Вернуться к плееру",
         statusInit: "Инициализация...", statusStreams: "Загрузка...", statusMerging: "Сборка и метаданные...",
         statusDone: "Готово!", found: "Найденные главы:", noChapters: "Главы не найдены. Будет скачано одним файлом.",
@@ -56,7 +58,9 @@ const i18n = {
         dropKicker: "Перетащите сюда", dropLinkTitle: "Бросьте ссылку для старта", dropLinkSubtitle: "Вставьте или перетащите URL страницы книги.",
         dropFilesTitle: "Импорт локальных файлов пока не готов", dropFilesSubtitle: "Пока перетаскивайте ссылку на страницу книги, а не аудиофайлы.",
         dropUnsupportedTitle: "Неподдерживаемое содержимое", dropUnsupportedSubtitle: "Попробуйте перетащить http(s)-ссылку.",
-        loadingDialog: "Открытие окна...", assemblingStatus: "⚙️ Сборка M4B... Пожалуйста, подождите",
+        loadingDialog: "Открытие окна...", assemblingStatus: "⚙️ Сборка файлов... Пожалуйста, подождите",
+        progressDownloading: "Загрузка",
+        progressAssembling: "Сборка",
         libTooltip: "Библиотека", themeTooltip: "Тема", langTooltip: "Язык", settingsTooltip: "Настройки", settingsTitle: "Настройки", clearAllDataBtn: "Очистить все данные приложения и кэш", languageLabel: "Язык", downloadAnotherTooltip: "Загрузить еще одну",
         chaptersTooltip: "Показать или скрыть список глав",
         chapterCountShort: "гл.",
@@ -73,7 +77,13 @@ const appState = {
     showPlayer: false,
     showPreview: false,
     previewLoading: false,
-    showProgress: false
+    showProgress: false,
+    mainButtonLabelOverride: '',
+    status: {
+        visible: false,
+        message: '',
+        tone: 'info'
+    }
 };
 let playerLayoutFrame = null;
 let mainDragDepth = 0;
@@ -136,42 +146,18 @@ function syncMainSurfaceState() {
     mainCard.classList.toggle('player-session', hasPlayerSession);
 }
 
-function syncIdleState() {
-    const idleState = document.getElementById('idleState');
-    const statusDiv = document.getElementById('status');
-    if (!idleState || !statusDiv) {
-        return;
-    }
-    const isVisible =
-        !appState.showPlayer &&
-        !appState.showPreview &&
-        statusDiv.style.display === 'none' &&
-        !appState.showProgress &&
-        appState.step === 'start';
-    idleState.style.display = isVisible ? 'block' : 'none';
-}
-
 function setStatusMessage(message, tone = 'info') {
-    const statusDiv = document.getElementById('status');
-    if (!statusDiv) {
-        return;
-    }
-    statusDiv.style.display = 'block';
-    statusDiv.classList.remove('status-info', 'status-success', 'status-error');
-    statusDiv.classList.add(`status-${tone}`);
-    statusDiv.innerText = message;
-    syncIdleState();
+    appState.status.visible = true;
+    appState.status.message = message;
+    appState.status.tone = tone;
+    updateUI();
 }
 
 function clearStatusMessage() {
-    const statusDiv = document.getElementById('status');
-    if (!statusDiv) {
-        return;
-    }
-    statusDiv.style.display = 'none';
-    statusDiv.classList.remove('status-info', 'status-success', 'status-error');
-    statusDiv.innerText = '';
-    syncIdleState();
+    appState.status.visible = false;
+    appState.status.message = '';
+    appState.status.tone = 'info';
+    updateUI();
 }
 
 function setDropOverlay(kind = 'link') {
@@ -381,6 +367,10 @@ function updateUI() {
     const chaptersBox = document.getElementById('chaptersBox');
     const playerBox = document.getElementById('playerBox');
     const progressBox = document.getElementById('pbox');
+    const progressPhase = document.getElementById('progressPhase');
+    const statusDiv = document.getElementById('status');
+    const idleState = document.getElementById('idleState');
+    const secondaryBtn = document.getElementById('secondaryBtn');
     document.getElementById('urlInput').placeholder = t.placeholder;
     document.getElementById('mode-m4b').innerText = t.modeM4B;
     document.getElementById('mode-mp3').innerText = t.modeSingle;
@@ -415,6 +405,43 @@ function updateUI() {
 
     const btn = document.getElementById('mainBtn');
     const toolbarDownloadBtn = document.getElementById('downloadAnotherBtn');
+    const defaultMainButtonText = appState.step === 'done'
+        ? {
+            text: t.btnAgain
+        }
+        : appState.step === 'confirm'
+            ? {
+                text: t.btnConfirm
+            }
+            : {
+                text: (appState.currentMode === 'm4b' || appState.currentMode === 'zip') ? t.btnFetch : t.btnStart
+            };
+    const stepConfig = appState.step === 'done'
+        ? {
+            toolbarLinkHidden: true,
+            toolbarPlayerMode: true,
+            modesVisible: false,
+            mainButtonVisible: false,
+            mainButtonText: appState.mainButtonLabelOverride || defaultMainButtonText.text,
+            toolbarDownloadVisible: true
+        }
+        : appState.step === 'confirm'
+            ? {
+                toolbarLinkHidden: false,
+                toolbarPlayerMode: false,
+                modesVisible: true,
+                mainButtonVisible: true,
+                mainButtonText: appState.mainButtonLabelOverride || defaultMainButtonText.text,
+                toolbarDownloadVisible: false
+            }
+            : {
+                toolbarLinkHidden: false,
+                toolbarPlayerMode: false,
+                modesVisible: true,
+                mainButtonVisible: true,
+                mainButtonText: appState.mainButtonLabelOverride || defaultMainButtonText.text,
+                toolbarDownloadVisible: false
+            };
     if (chaptersBox) {
         chaptersBox.style.display = appState.showPreview ? 'block' : 'none';
         chaptersBox.classList.toggle('is-preview-loading', appState.previewLoading);
@@ -425,43 +452,41 @@ function updateUI() {
     if (progressBox) {
         progressBox.style.display = appState.showProgress ? 'block' : 'none';
     }
-    if (appState.step === 'start') {
-        if (toolbarLink) toolbarLink.hidden = false;
-        if (mainToolbar) mainToolbar.classList.remove('toolbar-player-mode');
-        optGroup.style.display = 'flex';
-        btn.innerText = (appState.currentMode === 'm4b' || appState.currentMode === 'zip') ? t.btnFetch : t.btnStart;
-        btn.style.display = 'block';
-        toolbarDownloadBtn.hidden = true;
-    } else if (appState.step === 'confirm') {
-        if (toolbarLink) toolbarLink.hidden = false;
-        if (mainToolbar) mainToolbar.classList.remove('toolbar-player-mode');
-        optGroup.style.display = 'flex';
-        btn.innerText = t.btnConfirm;
-        btn.style.display = 'block';
-        toolbarDownloadBtn.hidden = true;
-    } else if (appState.step === 'done') {
-        if (toolbarLink) toolbarLink.hidden = true;
-        if (mainToolbar) mainToolbar.classList.add('toolbar-player-mode');
-        optGroup.style.display = 'none';
-        btn.style.display = 'none';
-        toolbarDownloadBtn.hidden = false;
+    if (progressPhase && progressBox) {
+        progressPhase.innerText = progressBox.dataset.phase === 'assembling' ? t.progressAssembling : t.progressDownloading;
     }
-    syncSecondaryAction();
+    if (statusDiv) {
+        statusDiv.style.display = appState.status.visible ? 'block' : 'none';
+        statusDiv.classList.remove('status-info', 'status-success', 'status-error');
+        if (appState.status.visible) {
+            statusDiv.classList.add(`status-${appState.status.tone}`);
+        }
+        statusDiv.innerText = appState.status.message;
+    }
+    if (idleState) {
+        const isIdleVisible =
+            !appState.showPlayer &&
+            !appState.showPreview &&
+            !appState.status.visible &&
+            !appState.showProgress &&
+            appState.step === 'start';
+        idleState.style.display = isIdleVisible ? 'block' : 'none';
+    }
+    if (toolbarLink) toolbarLink.hidden = stepConfig.toolbarLinkHidden;
+    if (mainToolbar) mainToolbar.classList.toggle('toolbar-player-mode', stepConfig.toolbarPlayerMode);
+    optGroup.style.display = stepConfig.modesVisible ? 'flex' : 'none';
+    btn.innerText = stepConfig.mainButtonText;
+    btn.style.display = stepConfig.mainButtonVisible ? 'block' : 'none';
+    toolbarDownloadBtn.hidden = !stepConfig.toolbarDownloadVisible;
+    if (secondaryBtn) {
+        secondaryBtn.innerText = t.btnBackToPlayer;
+        secondaryBtn.style.display = hasReturnablePlayer() ? 'block' : 'none';
+    }
     syncMainSurfaceState();
-    syncIdleState();
 }
 
 function hasReturnablePlayer() {
     return !!appState.playerReturnState && !!appState.playerReturnState.fileName && !appState.showPlayer;
-}
-
-function syncSecondaryAction() {
-    const secondaryBtn = document.getElementById('secondaryBtn');
-    if (!secondaryBtn) {
-        return;
-    }
-    secondaryBtn.innerText = i18n[appState.currentLang].btnBackToPlayer;
-    secondaryBtn.style.display = hasReturnablePlayer() ? 'block' : 'none';
 }
 
 function toggleLang() { appState.currentLang = appState.currentLang === 'en' ? 'ru' : 'en'; localStorage.setItem('lang', appState.currentLang); updateUI(); }
@@ -546,7 +571,6 @@ window.addEventListener('DOMContentLoaded', () => {
     initLibraryInteractions();
     initSettingsMenu();
     initDragAndDrop();
-    syncIdleState();
     schedulePlayerLayoutSync();
 });
 
@@ -659,7 +683,7 @@ function playFromLibrary(fileName, autoPlay = true, keepPanels = false, autoOpen
     }
     localStorage.setItem('last-played-file', fileName);
     appState.step = 'done';
-    document.getElementById('mainBtn').innerText = i18n[appState.currentLang].btnAgain;
+    appState.mainButtonLabelOverride = '';
     initPlayer(fileName, autoOpenChapters);
     if (autoPlay) {
         setTimeout(() => {
