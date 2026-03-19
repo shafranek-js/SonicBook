@@ -74,6 +74,7 @@ const appState = {
     currentMode: localStorage.getItem('mode') || 'm4b',
     step: 'start',
     playerReturnState: null,
+    activeDownloadTask: null,
     showPlayer: false,
     showPreview: false,
     previewLoading: false,
@@ -677,7 +678,7 @@ function playFromLibrary(fileName, autoPlay = true, keepPanels = false, autoOpen
     } else {
         appState.showPreview = false;
         appState.previewLoading = false;
-        appState.showProgress = false;
+        syncDownloadProgressVisibility();
         clearStatusMessage();
         updateUI();
     }

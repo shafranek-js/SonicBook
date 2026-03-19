@@ -22,6 +22,18 @@ def parse_ffmpeg_out_time(value):
     except Exception:
         return 0.0
 
+
+def parse_content_range_header(value):
+    match = re.match(r"bytes\s+(\d+)-(\d+)/(\d+|\*)", (value or "").strip(), re.IGNORECASE)
+    if not match:
+        return None
+    start, end, total = match.groups()
+    return {
+        "start": int(start),
+        "end": int(end),
+        "total": None if total == "*" else int(total)
+    }
+
 async def get_stream_duration(m3u8_url):
     try:
         cmd = [config.FFPROBE_PATH, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", m3u8_url]
@@ -115,6 +127,9 @@ def prepare_task_work_dir(task_id):
 def move_to_library(src_path, dest_name):
     if not src_path or not os.path.exists(src_path):
         return None
+    if os.path.isfile(src_path) and os.path.getsize(src_path) <= 0:
+        log_debug(f"Refusing to move empty artifact into library: {src_path}")
+        return None
 
     dest_path = os.path.join(config.DOWNLOADS_DIR, dest_name)
     if os.path.exists(dest_path):
@@ -146,15 +161,27 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id, w
     # Нейтральное имя для сборки
     temp_m4b = os.path.join(work_dir, f"out_{task_id}.m4b")
     
+    source_ext = os.path.splitext(source_file)[1].lower()
+    needs_audio_transcode = source_ext == ".mp3"
+
     cmd = [
         config.FFMPEG_PATH, "-y", "-progress", "pipe:1", "-nostats", "-i", source_file, "-i", meta_path
     ]
-    
+
     if cover_path and os.path.exists(cover_path):
-        cmd.extend(["-i", cover_path, "-map", "0", "-map", "2", "-c", "copy", "-disposition:v", "attached_pic"])
+        cmd.extend(["-i", cover_path, "-map", "0:a", "-map", "2:v"])
+        if needs_audio_transcode:
+            cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+        else:
+            cmd.extend(["-c:a", "copy"])
+        cmd.extend(["-c:v", "copy", "-disposition:v", "attached_pic"])
     else:
-        cmd.extend(["-c:a", "copy"])
-        
+        cmd.extend(["-map", "0:a"])
+        if needs_audio_transcode:
+            cmd.extend(["-c:a", "aac", "-b:a", "128k"])
+        else:
+            cmd.extend(["-c:a", "copy"])
+
     cmd.extend(["-map_metadata", "1", temp_m4b])
     
     source_duration = await get_media_duration(source_file)
@@ -167,10 +194,15 @@ async def create_m4b_with_chapters(source_file, chapters, title_base, task_id, w
         log_debug(f"FFmpeg Error (code {returncode}): {stderr.decode(errors='replace')}")
     
     if os.path.exists(meta_path): os.remove(meta_path)
-    
-    # Переименовываем в красивое название после сборки
-    if os.path.exists(temp_m4b):
+
+    if returncode == 0 and os.path.exists(temp_m4b) and os.path.getsize(temp_m4b) > 0:
         return temp_m4b
+
+    if os.path.exists(temp_m4b):
+        try:
+            os.remove(temp_m4b)
+        except OSError:
+            pass
     return None
 
 async def split_to_chapters(source_file, chapters, title_base, task_id, work_dir, source_ext, progress_callback=None):
@@ -217,36 +249,98 @@ async def split_to_chapters(source_file, chapters, title_base, task_id, work_dir
     return zip_path
 
 async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
-    """Кастомный параллельный загрузчик для прямых MP3 ссылок с защитой от обрывов"""
+    """Кастомный параллельный загрузчик для прямых MP3 ссылок с resume-повторами."""
     os.makedirs(temp_dir, exist_ok=True)
     total_files = len(urls)
     downloaded = 0
+    semaphore = asyncio.Semaphore(2)
     
-    async def download_file(client, url, index, retries=3):
+    async def download_file(client, url, index, retries=5):
         nonlocal downloaded
         file_path = os.path.join(temp_dir, f"{index:04d}.mp3")
         
-        for attempt in range(retries):
-            try:
-                # Используем увеличенные таймауты
-                async with client.stream('GET', url, timeout=httpx.Timeout(30.0, read=120.0)) as response:
-                    response.raise_for_status()
-                    async with aiofiles.open(file_path, 'wb') as f:
-                        async for chunk in response.aiter_bytes():
-                            await f.write(chunk)
-                downloaded += 1
-                percent = round((downloaded / total_files) * 100.0, 3)
-                await progress_callback(percent, downloaded, total_files, phase="downloading")
-                return file_path
-            except Exception as e:
-                log_debug(f"Chunk {index} failed (attempt {attempt+1}/{retries}): {e}")
-                await asyncio.sleep(2) # Пауза перед новой попыткой
+        async with semaphore:
+            for attempt in range(retries):
+                resume_offset = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                headers = {"Range": f"bytes={resume_offset}-"} if resume_offset > 0 else {}
+                try:
+                    async with client.stream("GET", url, headers=headers, timeout=httpx.Timeout(30.0, read=120.0)) as response:
+                        if resume_offset > 0 and response.status_code == 200:
+                            log_debug(f"Chunk {index}: server ignored Range resume from {resume_offset}, restarting from zero")
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                            await asyncio.sleep(1)
+                            continue
+                        if response.status_code == 416:
+                            log_debug(f"Chunk {index}: server rejected Range resume from {resume_offset}, restarting from zero")
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                            await asyncio.sleep(1)
+                            continue
+
+                        response.raise_for_status()
+
+                        content_range = parse_content_range_header(response.headers.get("content-range"))
+                        content_length = int(response.headers.get("content-length") or 0)
+                        open_mode = 'wb'
+                        expected_total = None
+
+                        if resume_offset > 0 and response.status_code == 206:
+                            if not content_range or content_range["start"] != resume_offset:
+                                raise ValueError(
+                                    f"Unexpected Content-Range for resumed chunk: {response.headers.get('content-range')}"
+                                )
+                            open_mode = 'ab'
+                            expected_total = content_range["total"]
+                            log_debug(f"Resuming chunk {index} from {resume_offset} bytes")
+                        else:
+                            if resume_offset > 0 and os.path.exists(file_path):
+                                os.remove(file_path)
+                                resume_offset = 0
+                            expected_total = content_range["total"] if content_range else (content_length or None)
+
+                        wrote_bytes = 0
+                        async with aiofiles.open(file_path, open_mode) as f:
+                            async for chunk in response.aiter_bytes(1024 * 256):
+                                if not chunk:
+                                    continue
+                                wrote_bytes += len(chunk)
+                                await f.write(chunk)
+
+                    final_size = os.path.getsize(file_path)
+                    if final_size <= 0:
+                        raise ValueError("Downloaded direct-url file is empty")
+                    if wrote_bytes <= 0 and resume_offset <= 0:
+                        raise ValueError("Direct-url response body produced no bytes")
+                    if expected_total is not None and final_size < expected_total:
+                        raise ValueError(
+                            f"Incomplete direct-url file: have {final_size} bytes, expected {expected_total}"
+                        )
+
+                    downloaded += 1
+                    percent = round((downloaded / total_files) * 100.0, 3)
+                    log_debug(f"Direct chunk {index} saved ({final_size} bytes)")
+                    await progress_callback(percent, downloaded, total_files, phase="downloading")
+                    return file_path
+                except Exception as e:
+                    partial_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                    if partial_size <= 0 and os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except OSError:
+                            pass
+                    if partial_size > 0:
+                        log_debug(
+                            f"Chunk {index} failed (attempt {attempt+1}/{retries}), keeping {partial_size} bytes for resume: {e}"
+                        )
+                    else:
+                        log_debug(f"Chunk {index} failed (attempt {attempt+1}/{retries}): {e}")
+                    await asyncio.sleep(min(10, 2 * (attempt + 1)))
         
         log_debug(f"Failed to download {url} after {retries} attempts.")
         return None
 
-    # Скачиваем в 4 потока, чтобы не перегружать сервер и избежать обрывов (peer closed connection)
-    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=4), http2=True) as client:
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=2), http2=False, follow_redirects=True) as client:
         tasks = [download_file(client, url, i) for i, url in enumerate(urls)]
         results = await asyncio.gather(*tasks)
     
@@ -432,7 +526,9 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
             if not final_source_path or not os.path.exists(final_source_path):
                 return None
 
-            move_to_library(final_source_path, final_file)
+            moved_final_path = move_to_library(final_source_path, final_file)
+            if not moved_final_path:
+                return None
             if os.path.exists(source) and os.path.abspath(source) != os.path.abspath(final_source_path):
                 os.remove(source)
 

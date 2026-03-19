@@ -126,3 +126,36 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   Download fragments, `.part/.ytdl`, concat lists, and intermediate audio files into a local app-owned work directory instead of writing them directly into the user library path.
 - [x] 12. **Move Only Completed Artifacts Into Library:**
   After successful assembly, move the final audio/zip file plus sidecar JSON and cover image from local staging into `DOWNLOADS_DIR`.
+
+## Direct URL Reliability
+
+- [x] 13. **Stabilize `knigavuhe` Direct URL Downloads:**
+  Replace the hanging streamed direct-URL path with a simpler bounded-concurrency downloader that validates non-empty MP3 files before merge.
+- [x] 14. **Fix direct MP3 -> M4B assembly and reject empty artifacts:**
+  Transcode direct MP3 sources to an M4B-compatible audio codec during assembly and refuse to move zero-byte output files into the library after failed `ffmpeg` runs.
+- [x] 15. **Implement resumable direct MP3 downloads for unstable sources:**
+  Add `Range`-based resume support for direct MP3 URLs so interrupted `knigavuhe` chapter downloads can continue from existing partial files instead of restarting from zero.
+  Implemented:
+  - Byte-range resume for existing partial chapter files.
+  - Safe fallback to full restart when the server ignores or rejects `Range`.
+  - Validation against expected final response size before accepting a resumed file.
+  - Reduced direct-download concurrency and stronger retry backoff.
+  Remaining follow-up:
+  - None in this area; duplicate same-book launches are now guarded at the task-creation layer.
+  Plan:
+  - Probe direct MP3 URLs for partial-content support via `Range`/`206` behavior.
+  - Resume from existing partial file size when the server honors byte ranges.
+  - Fall back to full restart when the server ignores `Range` or returns invalid offsets.
+  - Validate final file size against expected response length before accepting the chunk.
+  - Reduce `knigavuhe` concurrency and add stronger backoff around resumed retries.
+  - Guard against duplicate same-book launches so task folders and logs do not interleave.
+
+## Task Coordination
+
+- [x] 17. **Prevent duplicate same-book background downloads:**
+  Reuse the existing active `task_id` for the same source URL instead of launching a second concurrent job that would interleave logs and staging folders.
+
+## Playback Continuity
+
+- [x] 16. **Preserve playback across mode switches and completed downloads:**
+  Do not pause the current book when switching from player mode into download mode with `preservePlayer`, and do not auto-interrupt current playback when a newly downloaded book finishes assembling unless there was no active book already loaded.

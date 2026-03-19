@@ -32,6 +32,33 @@ function setProgressPhase(phase, percent = 0, current = 0, total = 0) {
     }
 }
 
+let activeProgressEventSource = null;
+
+function hasActiveDownloadTask() {
+    return !!appState.activeDownloadTask && !['success', 'error', 'not_found'].includes(appState.activeDownloadTask.status);
+}
+
+function syncDownloadProgressVisibility() {
+    appState.showProgress = hasActiveDownloadTask();
+}
+
+function updateActiveDownloadTask(fields = {}) {
+    appState.activeDownloadTask = {
+        ...(appState.activeDownloadTask || {}),
+        ...fields
+    };
+    syncDownloadProgressVisibility();
+}
+
+function clearActiveDownloadTask() {
+    if (activeProgressEventSource) {
+        activeProgressEventSource.close();
+        activeProgressEventSource = null;
+    }
+    appState.activeDownloadTask = null;
+    appState.showProgress = false;
+}
+
 async function handleAction() {
     if (appState.step === 'start') {
         if (appState.currentMode === 'm4b' || appState.currentMode === 'zip') {
@@ -53,18 +80,18 @@ function handleSecondaryAction() {
     appState.showPlayer = true;
     appState.showPreview = false;
     appState.previewLoading = false;
-    appState.showProgress = false;
     appState.mainButtonLabelOverride = '';
     setChaptersPanelOpen(!!appState.playerReturnState.panelOpen);
     appState.playerReturnState = null;
     appState.step = 'done';
+    setPlayButtonState(!audio.paused);
+    syncDownloadProgressVisibility();
     updateUI();
     schedulePlayerLayoutSync();
 }
 
 function resetForm({ preservePlayer = false } = {}) {
     document.getElementById('urlInput').value = '';
-    appState.showProgress = false;
     appState.showPreview = false;
     appState.previewLoading = false;
     appState.mainButtonLabelOverride = '';
@@ -72,13 +99,18 @@ function resetForm({ preservePlayer = false } = {}) {
     const container = document.getElementById('appContainer');
     const canPreservePlayer = preservePlayer && playerState.fileName && appState.showPlayer;
     if (canPreservePlayer) {
-        appState.playerReturnState = {
-            fileName: playerState.fileName,
-            panelOpen: container.classList.contains('panel-open')
-        };
-        appState.showPlayer = false;
-        container.classList.remove('panel-open');
-        localStorage.setItem('panel-open', 'false');
+        if (!audio.paused) {
+            appState.playerReturnState = null;
+            appState.showPlayer = true;
+        } else {
+            appState.playerReturnState = {
+                fileName: playerState.fileName,
+                panelOpen: container.classList.contains('panel-open')
+            };
+            appState.showPlayer = false;
+            container.classList.remove('panel-open');
+            localStorage.setItem('panel-open', 'false');
+        }
     } else {
         appState.showPlayer = false;
         clearPlayerCover();
@@ -86,15 +118,36 @@ function resetForm({ preservePlayer = false } = {}) {
         localStorage.setItem('panel-open', 'false');
         localStorage.removeItem('last-played-file');
         appState.playerReturnState = null;
+        if (!audio.paused) {
+            audio.pause();
+        }
+        setPlayButtonState(false);
     }
-    if (!audio.paused) {
-        audio.pause();
-    }
-    setPlayButtonState(false);
     appState.step = 'start';
+    syncDownloadProgressVisibility();
     updateUI();
     syncResponsivePanelWidths();
     schedulePlayerLayoutSync();
+}
+
+function shouldAutoOpenDownloadedBook(fileName) {
+    return !playerState.fileName || playerState.fileName === fileName;
+}
+
+function finishIntoCurrentPlayerSession(downloadedFileName) {
+    appState.showPreview = false;
+    appState.previewLoading = false;
+    appState.mainButtonLabelOverride = '';
+    appState.step = 'done';
+    clearStatusMessage();
+    clearActiveDownloadTask();
+    updateUI();
+    if (typeof loadLibrary === 'function') {
+        loadLibrary();
+    }
+    if (downloadedFileName && playerState.fileName) {
+        localStorage.setItem('sonicbook-last-download', downloadedFileName);
+    }
 }
 
 async function fetchInfo() {
@@ -148,7 +201,14 @@ async function startDownload() {
     const url = getValidatedBookUrl();
     if (!url) return;
     document.getElementById('mainBtn').disabled = true;
-    appState.showProgress = true;
+    updateActiveDownloadTask({
+        id: null,
+        status: 'processing',
+        phase: 'downloading',
+        percent: 0,
+        current_frag: 0,
+        total_frags: 0
+    });
     updateUI();
     setProgressPhase('downloading', 0, 0, 0);
     setStatusMessage(i18n[appState.currentLang].statusInit, 'info');
@@ -169,9 +229,10 @@ async function startDownload() {
             throw new Error(message);
         }
         const data = await res.json();
+        updateActiveDownloadTask({ id: data.task_id });
         poll(data.task_id);
     } catch (e) {
-        appState.showProgress = false;
+        clearActiveDownloadTask();
         appState.mainButtonLabelOverride = '';
         setStatusMessage('Error: ' + e.message, 'error');
         document.getElementById('mainBtn').disabled = false;
@@ -180,33 +241,61 @@ async function startDownload() {
 }
 
 function poll(id) {
+    if (activeProgressEventSource) {
+        activeProgressEventSource.close();
+    }
     const eventSource = new EventSource('/api/progress/stream/' + id);
+    activeProgressEventSource = eventSource;
     eventSource.onmessage = function(event) {
         const data = JSON.parse(event.data), t = i18n[appState.currentLang];
+        updateActiveDownloadTask({
+            id,
+            status: data.status,
+            phase: data.phase || (data.status === 'assembling' ? 'assembling' : 'downloading'),
+            percent: data.percent || 0,
+            current_frag: data.current_frag || 0,
+            total_frags: data.total_frags || 0
+        });
         if (data.status === 'processing' || data.status === 'merging') {
             setStatusMessage(data.status === 'merging' ? t.statusMerging : t.statusStreams, 'info');
             setProgressPhase(data.phase || 'downloading', data.percent || 0, data.current_frag || 0, data.total_frags || 0);
+            updateUI();
         } else if (data.status === 'assembling') {
             setStatusMessage(t.assemblingStatus, 'info');
             setProgressPhase('assembling', data.percent || 0, data.current_frag || 0, data.total_frags || 0);
+            updateUI();
         } else if (data.status === 'success') {
             eventSource.close();
-            setStatusMessage(t.statusDone, 'success');
-            appState.showProgress = false;
+            activeProgressEventSource = null;
             setProgressPhase(data.phase || 'assembling', data.percent || 100, data.current_frag || 0, data.total_frags || 0);
             document.getElementById('mainBtn').disabled = false;
-            appState.mainButtonLabelOverride = '';
-            appState.step = 'done';
-            updateUI();
-            initPlayer(data.file_name);
+            if (shouldAutoOpenDownloadedBook(data.file_name)) {
+                setStatusMessage(t.statusDone, 'success');
+                clearActiveDownloadTask();
+                appState.mainButtonLabelOverride = '';
+                if (typeof loadLibrary === 'function') {
+                    loadLibrary();
+                }
+                appState.step = 'done';
+                updateUI();
+                initPlayer(data.file_name);
+            } else {
+                finishIntoCurrentPlayerSession(data.file_name);
+            }
         } else if (data.status === 'error' || data.status === 'not_found') {
             eventSource.close();
-            appState.showProgress = false;
+            activeProgressEventSource = null;
+            clearActiveDownloadTask();
             appState.mainButtonLabelOverride = t.btnRetry;
             setStatusMessage('Error occurred', 'error');
             document.getElementById('mainBtn').disabled = false;
             updateUI();
         }
     };
-    eventSource.onerror = () => eventSource.close();
+    eventSource.onerror = () => {
+        eventSource.close();
+        if (activeProgressEventSource === eventSource) {
+            activeProgressEventSource = null;
+        }
+    };
 }

@@ -162,8 +162,12 @@ async def get_info(request: InfoRequest):
 @app.post("/api/download")
 async def start_download(request: DownloadRequest, background_tasks: BackgroundTasks):
     book_url = validate_book_url(request.url)
+    existing_task = progress_service.find_active_task_by_source(book_url)
+    if existing_task:
+        task_id, _ = existing_task
+        return {"task_id": task_id, "reused": True}
     task_id = str(uuid.uuid4())
-    progress_service.set_progress(task_id, progress_service.create_progress_entry())
+    progress_service.set_progress(task_id, progress_service.create_progress_entry(source_url=book_url, mode=request.mode))
     background_tasks.add_task(process_book, task_id, book_url, request.mode)
     return {"task_id": task_id}
 

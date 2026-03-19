@@ -5,7 +5,7 @@ progress_store = {}
 terminal_progress_statuses = {"success", "error", "not_found"}
 
 
-def create_progress_entry() -> dict:
+def create_progress_entry(source_url: str = "", mode: str = "") -> dict:
     return {
         "status": "searching",
         "phase": "searching",
@@ -13,6 +13,8 @@ def create_progress_entry() -> dict:
         "current_frag": 0,
         "total_frags": 0,
         "file_name": "",
+        "source_url": source_url,
+        "mode": mode,
         "timestamp": time.time()
     }
 
@@ -45,3 +47,15 @@ def cleanup_expired_progress(expire_seconds: int) -> list[str]:
     for tid in to_delete:
         del progress_store[tid]
     return to_delete
+
+
+def find_active_task_by_source(source_url: str):
+    if not source_url:
+        return None
+    for task_id, data in progress_store.items():
+        if data.get("source_url") != source_url:
+            continue
+        if data.get("status") in terminal_progress_statuses:
+            continue
+        return task_id, data
+    return None
