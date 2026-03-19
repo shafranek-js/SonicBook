@@ -1,0 +1,46 @@
+import time
+
+
+progress_store = {}
+terminal_progress_statuses = {"success", "error", "not_found"}
+
+
+def create_progress_entry() -> dict:
+    return {
+        "status": "searching",
+        "percent": 0.0,
+        "current_frag": 0,
+        "total_frags": 0,
+        "file_name": "",
+        "timestamp": time.time()
+    }
+
+
+def get_progress(task_id: str) -> dict:
+    return progress_store.get(task_id, {"status": "not_found"})
+
+
+def set_progress(task_id: str, payload: dict):
+    progress_store[task_id] = payload
+
+
+def update_progress_entry(task_id: str, **fields):
+    entry = progress_store.get(task_id)
+    if entry is None:
+        return None
+
+    entry.update(fields)
+    entry["timestamp"] = time.time()
+    return entry
+
+
+def cleanup_expired_progress(expire_seconds: int) -> list[str]:
+    now = time.time()
+    to_delete = [
+        tid for tid, data in list(progress_store.items())
+        if data.get("status") in terminal_progress_statuses
+        and now - data.get("timestamp", 0) > expire_seconds
+    ]
+    for tid in to_delete:
+        del progress_store[tid]
+    return to_delete

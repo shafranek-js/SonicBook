@@ -1,10 +1,8 @@
 import os
 import uuid
-import time
 import asyncio
 import logging
 import json
-import zipfile
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 import uvicorn
@@ -17,6 +15,9 @@ from pydantic import BaseModel
 import config
 import scraper
 import processor
+import library_service
+import progress_service
+import zip_service
 
 # Setup logging
 logging.basicConfig(
@@ -28,14 +29,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# In-memory progress tracking
-# task_id -> {status, percent, current_frag, total_frags, file_name, timestamp}
-progress_store = {}
-terminal_progress_statuses = {"success", "error", "not_found"}
-
-# Locks for async operations
-zip_extraction_locks = {}
 
 def resolve_download_path(file_name: str) -> str:
     if not file_name:
@@ -91,54 +84,6 @@ def install_asyncio_exception_filter():
     loop.set_exception_handler(handler)
     return previous_handler
 
-def update_progress_entry(task_id: str, **fields):
-    entry = progress_store.get(task_id)
-    if entry is None:
-        return None
-
-    entry.update(fields)
-    entry["timestamp"] = time.time()
-    return entry
-
-def get_zip_extraction_lock(extract_dir_name: str) -> asyncio.Lock:
-    lock = zip_extraction_locks.get(extract_dir_name)
-    if lock is None:
-        lock = asyncio.Lock()
-        zip_extraction_locks[extract_dir_name] = lock
-    return lock
-
-def extract_zip_archive(zip_path: str, extract_dir_path: str):
-    with zipfile.ZipFile(zip_path, 'r') as archive:
-        archive.extractall(extract_dir_path)
-
-def load_sidecar_metadata(file_path: str) -> dict | None:
-    base_name = os.path.splitext(os.path.basename(file_path))[0]
-    json_path = os.path.join(os.path.dirname(file_path), f"{base_name}.json")
-    if not os.path.exists(json_path):
-        return None
-
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        logger.exception("Failed to read sidecar metadata: %s", json_path)
-        return None
-
-async def ensure_zip_extracted(zip_path: str, extract_dir_name: str, extract_dir_path: str):
-    if os.path.exists(extract_dir_path):
-        return
-
-    lock = get_zip_extraction_lock(extract_dir_name)
-    async with lock:
-        if os.path.exists(extract_dir_path):
-            return
-
-        try:
-            await asyncio.to_thread(extract_zip_archive, zip_path, extract_dir_path)
-        except Exception as e:
-            logger.error(f"Failed to extract zip {zip_path}: {e}")
-            raise HTTPException(status_code=500, detail="Failed to extract ZIP for playback")
-
 class InfoRequest(BaseModel):
     url: str
 
@@ -150,16 +95,7 @@ async def cleanup_task():
     """Background task to remove old store entries (files are kept permanently)"""
     while True:
         try:
-            now = time.time()
-            
-            # Expire only terminal tasks; active downloads should remain visible.
-            to_delete = [
-                tid for tid, data in list(progress_store.items())
-                if data.get("status") in terminal_progress_statuses
-                and now - data.get('timestamp', 0) > config.STORE_EXPIRE_SECONDS
-            ]
-            for tid in to_delete:
-                del progress_store[tid]
+            progress_service.cleanup_expired_progress(config.STORE_EXPIRE_SECONDS)
                 
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
@@ -227,14 +163,7 @@ async def get_info(request: InfoRequest):
 async def start_download(request: DownloadRequest, background_tasks: BackgroundTasks):
     book_url = validate_book_url(request.url)
     task_id = str(uuid.uuid4())
-    progress_store[task_id] = {
-        "status": "searching", 
-        "percent": 0.0, 
-        "current_frag": 0, 
-        "total_frags": 0, 
-        "file_name": "",
-        "timestamp": time.time()
-    }
+    progress_service.set_progress(task_id, progress_service.create_progress_entry())
     background_tasks.add_task(process_book, task_id, book_url, request.mode)
     return {"task_id": task_id}
 
@@ -243,10 +172,10 @@ async def process_book(task_id, url, mode):
         # 1. Get info again (or cache it)
         m3u8, title, chapters, cover = await scraper.get_book_info(url)
         if not m3u8:
-            update_progress_entry(task_id, status="error")
+            progress_service.update_progress_entry(task_id, status="error")
             return
 
-        update_progress_entry(task_id, status="processing")
+        progress_service.update_progress_entry(task_id, status="processing")
 
         # Define callback for progress
         async def update_progress(pct, curr, total, status=None):
@@ -256,7 +185,7 @@ async def process_book(task_id, url, mode):
             if curr is not None: fields["current_frag"] = curr
             if total is not None: fields["total_frags"] = total
             if fields:
-                update_progress_entry(task_id, **fields)
+                progress_service.update_progress_entry(task_id, **fields)
 
         # 2. Download and process
         clean_title = processor.sanitize_filename(title)
@@ -264,21 +193,21 @@ async def process_book(task_id, url, mode):
             task_id, m3u8, clean_title, chapters, mode, update_progress, cover, url
         )
         if final_file:
-            update_progress_entry(
+            progress_service.update_progress_entry(
                 task_id,
                 status="success",
                 percent=100.0,
                 file_name=final_file
             )
         else:
-            update_progress_entry(task_id, status="error")
+            progress_service.update_progress_entry(task_id, status="error")
     except Exception:
         logger.exception("Background task failed for %s", task_id)
-        update_progress_entry(task_id, status="error")
+        progress_service.update_progress_entry(task_id, status="error")
 
 @app.get("/api/progress/{task_id}")
 async def get_progress(task_id: str):
-    return progress_store.get(task_id, {"status": "not_found"})
+    return progress_service.get_progress(task_id)
 
 @app.get("/api/progress/stream/{task_id}")
 async def progress_stream(task_id: str, request: Request):
@@ -289,7 +218,7 @@ async def progress_stream(task_id: str, request: Request):
             if await request.is_disconnected():
                 break
                 
-            data = progress_store.get(task_id, {"status": "not_found"})
+            data = progress_service.get_progress(task_id)
             
             # Only send update if something changed
             if data.get("percent") != last_percent or data.get("status") != last_status:
@@ -309,25 +238,7 @@ async def progress_stream(task_id: str, request: Request):
 
 @app.get("/api/library")
 async def get_library():
-    if not os.path.exists(config.DOWNLOADS_DIR):
-        return {"files": []}
-        
-    files = []
-    for f in os.listdir(config.DOWNLOADS_DIR):
-        if f.endswith(('.m4b', '.mp3', '.zip', '.mp4', '.m4a')):
-            file_path = os.path.join(config.DOWNLOADS_DIR, f)
-            size_mb = round(os.path.getsize(file_path) / (1024 * 1024), 2)
-            has_meta = os.path.exists(os.path.join(config.DOWNLOADS_DIR, f"{os.path.splitext(f)[0]}.json"))
-            files.append({
-                "name": f,
-                "size_mb": size_mb,
-                "has_meta": has_meta,
-                "mtime": os.path.getmtime(file_path)
-            })
-    
-    # Sort by modification time, newest first
-    files.sort(key=lambda x: x["mtime"], reverse=True)
-    return {"files": files}
+    return {"files": library_service.list_library_files(config.DOWNLOADS_DIR)}
 
 @app.get("/api/files/{file_name:path}")
 async def download_file(file_name: str):
@@ -344,40 +255,7 @@ async def get_metadata(file_name: str):
     
     # Handle ZIP files (Playlist mode)
     if file_name.endswith('.zip'):
-        zip_path = file_path
-        if not os.path.exists(zip_path):
-            raise HTTPException(status_code=404, detail="ZIP file not found")
-            
-        extract_dir_name = f".extracted_{base_name}"
-        extract_dir_path = os.path.join(config.DOWNLOADS_DIR, extract_dir_name)
-        
-        # Extract if not already extracted
-        await ensure_zip_extracted(zip_path, extract_dir_name, extract_dir_path)
-                
-        # Build playlist
-        playlist = []
-        if os.path.exists(extract_dir_path):
-            files = sorted(os.listdir(extract_dir_path))
-            for f in files:
-                if f.endswith(('.mp3', '.m4a', '.mp4')):
-                    title = os.path.splitext(f)[0]
-                    # path relative to DOWNLOADS_DIR
-                    rel_path = f"{extract_dir_name}/{f}"
-                    playlist.append({"title": title, "file": rel_path})
-                    
-        payload = {
-            "title": base_name,
-            "mode": "zip",
-            "playlist": playlist
-        }
-        sidecar_meta = load_sidecar_metadata(file_path)
-        if sidecar_meta:
-            payload["title"] = sidecar_meta.get("title") or payload["title"]
-            payload["cover_url"] = sidecar_meta.get("cover_url")
-            payload["local_cover"] = sidecar_meta.get("local_cover")
-            payload["file_name"] = sidecar_meta.get("file_name", file_name)
-
-        return payload
+        return await zip_service.build_zip_metadata(file_path, file_name, config.DOWNLOADS_DIR)
 
     # Handle standard M4B/MP3 with JSON metadata
     json_path = os.path.join(os.path.dirname(file_path), f"{base_name}.json")

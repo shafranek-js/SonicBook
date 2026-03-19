@@ -84,3 +84,26 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
 ## Current Status
 
 - [x] **No open TODO items remain in this file.**
+
+## Refactor Plan
+
+- [x] 1. **Library Event Delegation (`static/app.js`):**
+  Replace inline `onclick` handlers in library row markup with `data-*` attributes plus a single delegated click handler on `#libraryList`.
+- [x] 2. **Frontend State Object (`static/app.js`):**
+  Consolidate `step`, language/mode, return-to-player flow, and related UI flags into one explicit state object instead of scattered globals and DOM-driven state.
+- [x] 3. **Frontend Module Split (`static/app.js`):**
+  Split the current monolith into separate files for app shell, library, player, download flow, and layout/responsive behavior.
+  Completed: app shell remains in `static/app.js`; library UI extracted to `static/library-ui.js`; download flow extracted to `static/download-flow.js`; layout and panel resizing extracted to `static/layout-ui.js`; player logic extracted to `static/player-ui.js`.
+- [x] 4. **Backend Service Extraction (`main.py`):**
+  Move library probing, progress-store logic, and ZIP playback helpers into separate service modules so `main.py` is mostly routing and lifecycle glue.
+  Completed: library probing and sidecar metadata loading extracted to `library_service.py`; progress store extracted to `progress_service.py`; ZIP playback and extraction helpers extracted to `zip_service.py`.
+- [x] 5. **Stylesheet Partitioning (`static/style.css`):**
+  Split CSS into base/tokens, layout, library, player, and responsive layers to reduce cascade-sensitive changes.
+  Completed: base/tokens extracted to `static/styles/base.css`; shell/layout extracted to `static/styles/layout.css`; player rules extracted to `static/styles/player.css`; library/panel rules extracted to `static/styles/library.css`; responsive rules extracted to `static/styles/responsive.css`; `static/style.css` now acts as the aggregator plus shared center-state styles.
+
+## Follow-up Refactors
+
+- [x] 6. **Centralize UI State Rendering (`static/app.js`, `static/download-flow.js`):**
+  Make `updateUI()` the main source of truth for center-panel visibility so `step` is not split across direct `style.display` mutations in the download and player-return flows.
+- [x] 7. **Chapter Panel Event Delegation (`static/player-ui.js`):**
+  Replace inline `onclick` handlers in the player chapter list with `data-*` attributes plus a single delegated click handler on `#playerChaptersList`.

@@ -1,0 +1,40 @@
+:root { 
+    --primary: #6366F1; --bg: #0F172A; --card: #1E293B; --text: #F8FAFC; --muted: #94A3B8; --success: #10B981; --error: #FB7185; --border: #334155; 
+    --lib-width: 450px;
+    --chap-width: 350px;
+    --space-xs: 4px;
+    --space-sm: 6px;
+    --space-md: 10px;
+    --space-lg: 12px;
+    --space-xl: 14px;
+    --panel-padding: var(--space-lg);
+    --panel-gap: var(--space-md);
+    --time-font: Consolas, "SFMono-Regular", "Roboto Mono", Menlo, Monaco, monospace;
+}
+body.light-theme { --bg: #F3F4F6; --card: #FFFFFF; --text: #1F2937; --muted: #6B7280; --border: #E5E7EB; }
+* { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.3s, color 0.3s; }
+
+body { 
+    font-family: system-ui, sans-serif; 
+    background: var(--bg); 
+    color: var(--text); 
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden; /* No global scrollbar */
+}
+
+/* Custom Scrollbar Styling */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--primary); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+/* Resizer Handles */
+.resizer { position: absolute; top: 0; bottom: 0; width: 12px; cursor: col-resize; z-index: 20; background: transparent; transition: background 0.2s; }
+.resizer:hover, .is-resizing .resizer { background: var(--primary); opacity: 0.5; }
+.resizer-right { right: -6px; }
+.resizer-left { left: -6px; }
+
+body.is-resizing * { user-select: none; }
+body.is-resizing .container, body.is-resizing .library-panel, body.is-resizing .chapters-panel, body.is-resizing .main-card { transition: none !important; }

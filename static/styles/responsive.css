@@ -1,0 +1,44 @@
+@container (max-width: 1080px) {
+    .main-toolbar {
+        gap: var(--space-sm);
+    }
+    .settings-menu {
+        width: min(280px, 76vw);
+    }
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 950px) {
+    body { overflow-y: auto; }
+    .container { flex-direction: column; height: auto; justify-content: flex-start; }
+    .main-card { width: 100%; min-width: 300px; height: auto; }
+    .main-drop-overlay {
+        inset: 8px;
+    }
+    .main-toolbar {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "left"
+            "link"
+            "right";
+        justify-items: stretch;
+        gap: 10px;
+    }
+    .controls,
+    .controls-left {
+        justify-content: center;
+        margin-left: 0;
+    }
+    .controls {
+        justify-content: center;
+    }
+    .settings-menu {
+        right: 50%;
+        transform: translateX(50%);
+        width: min(320px, calc(100vw - 40px));
+    }
+    .library-panel, .chapters-panel {
+        width: 100% !important;
+        height: 50vh;
+    }
+}
