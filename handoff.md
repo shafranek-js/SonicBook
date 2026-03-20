@@ -38,6 +38,13 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 -   **`config.py` (Configuration):**
     -   Dynamic paths loaded from `settings.json`.
     -   System-level FFmpeg/FFprobe path management via PATH or `FFMPEG_PATH` / `FFPROBE_PATH`.
+    -   Root-level `.env` support for local overrides, including Google Drive OAuth credentials.
+
+-   **`google_drive_service.py` (Google Drive Integration):**
+    -   Handles Google OAuth URL generation, callback exchange, token refresh, disconnect, and connection status.
+    -   Lists supported audiobook files from a configured Drive folder.
+    -   Imports selected Drive files into the local SonicBook library through the existing staging flow.
+    -   Provides backend-proxied metadata and `Range`-aware streaming for Drive-hosted audio playback.
 
 -   **`index.html` + `static/app.js` + `static/style.css` (Frontend):**
     -   **Symmetric Sliding Panels:** A unique 3-panel layout.
@@ -59,6 +66,10 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
         -   Saves `currentTime`, `duration`, and `trackIndex` (for ZIPs) to `localStorage`.
         -   Persists UI state (open panels, current mode, last played book) across page reloads.
     -   **Full i18n & Theming:** Reliable English and Russian support with dynamic UI updates and Dark/Light mode.
+    -   **Google Drive Settings & Library Source Toggle:**
+        -   Settings now expose Google Drive connection state, connect/disconnect actions, and a configurable folder ID.
+        -   The library panel can switch between `Local` and `Drive`.
+        -   Drive items can be imported into the local library and, for supported formats, streamed directly through backend proxy endpoints.
 
 -   **`recover_metadata.py` (Utility):**
     -   Retroactively generates or "repairs" JSON metadata for legacy or incomplete downloads using `ffprobe`.
@@ -75,6 +86,7 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 1.  **Python 3.10+**
 2.  **FFmpeg & FFprobe**: Must be in PATH or exposed via `FFMPEG_PATH` / `FFPROBE_PATH`.
 3.  **Playwright Browsers**: `playwright install chromium`
+4.  **Google Drive OAuth Credentials** (optional for Drive features): `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, and an allowed redirect URI such as `http://127.0.0.1:8000/api/google-drive/auth/callback`
 
 ---
 
@@ -91,6 +103,7 @@ SonicBook is now a robust, feature-complete audiobook management system.
 *   **Unified Progress Styling:** Library progress fills and chapter progress fills now share the same primary-color translucent treatment.
 *   **Player Polish:** Keyboard shortcuts, Media Session support, local cover rendering, standard media-style controls, and automatic chapter-aware library playback are all wired into the current UI.
 *   **Cover Backfill Workflow:** Existing libraries can be enriched after the fact using `backfill_covers.py` and curated `cover_aliases.json` source mappings.
+*   **Google Drive Workflow:** Remote Drive folders can now be connected from the app, browsed as a second library source, imported into the local library, and streamed for supported formats.
 *   **Robust Scraping:** Improved reliability for diverse source layouts and a retroactive metadata recovery tool.
 *   **Polished UX:** Custom indigo scrollbars, white timeline markers, and comprehensive Russian localization.
 
@@ -98,6 +111,7 @@ SonicBook is now a robust, feature-complete audiobook management system.
 1.  **Playwright Persistence:** Managing a browser context pool within `lifespan`.
 2.  **Error Feedback:** More detailed error states in the UI for scraper or download failures.
 3.  **Cover Backfill Ergonomics:** Optional in-app trigger or admin endpoint for running cover backfill without a separate script invocation.
+4.  **Google Drive Validation:** Live end-to-end testing still depends on real Google OAuth credentials being configured locally; current code-level and route-level validation is complete, but real OAuth/import/stream smoke tests remain pending until credentials are supplied.
 
 ---
 *Document updated on 18 March 2026.*

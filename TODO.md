@@ -159,3 +159,54 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
 
 - [x] 16. **Preserve playback across mode switches and completed downloads:**
   Do not pause the current book when switching from player mode into download mode with `preservePlayer`, and do not auto-interrupt current playback when a newly downloaded book finishes assembling unless there was no active book already loaded.
+
+## Google Drive Integration
+
+- [x] 18. **Persist Google Drive settings and connection state:**
+  Extend `settings.json` handling so SonicBook can safely store Drive-specific settings such as `folder_id`, token metadata, and connection status without regressing the existing downloads-folder flow.
+- [x] 19. **Add Google Drive OAuth backend scaffolding:**
+  Create a dedicated backend service for Google OAuth URL generation, callback handling, token refresh, and connection-status reporting using Google Drive API configuration from environment variables.
+- [x] 20. **Expose Google Drive settings/auth endpoints in FastAPI:**
+  Add API endpoints for Drive status, connect URL, callback, disconnect, and folder ID persistence so the frontend can attach later without backend rewiring.
+- [x] 21. **List audiobook files from a configured Drive folder:**
+  Implement a Drive library adapter that enumerates supported audiobook files plus sidecar cover/metadata files from a target `folderId`.
+- [x] 22. **Import selected Drive files into the local SonicBook library:**
+  Download a chosen Drive audiobook and its sidecars into local staging, then move the completed artifacts into `DOWNLOADS_DIR`.
+- [x] 23. **Add Settings UI for Google Drive connection:**
+  Extend the Settings popover with connection state, connect/disconnect controls, and a configurable `folderId`.
+- [x] 24. **Add Google Drive library browsing in the UI:**
+  Surface Drive-backed library items cleanly without breaking the existing local-library-first workflow.
+- [x] 25. **Support streamed playback from Google Drive via backend proxy:**
+  Add `Range`-aware proxy streaming for Drive-hosted audio so remote books can be played without importing first.
+- [x] 26. **Show visible Drive import activity in the library UI:**
+  Make `Import` show immediate in-row feedback (`Importing...` and short success state) so long Drive copies do not look like a stuck UI.
+- [x] 27. **Show bookmark-based progress for streamed Drive books:**
+  Reuse `bookmark_drive_*` playback data to render active-state and progress fill in the Drive library just like local books.
+- [x] 32. **Keep imported Drive books permanently marked as imported:**
+  Derive the Drive-row `Imported` state from the actual presence of the book in the local library so the green imported status survives reloads and is not just a temporary button flash.
+
+## Cross-Device Bookmark Sync
+
+- [x] 28. **Add a persistent backend bookmark store:**
+  Move playback progress into a JSON-backed server store keyed by a shared `book_id` instead of keeping progress only in per-browser `localStorage`.
+- [x] 29. **Expose bookmark read/write/delete API endpoints:**
+  Add backend endpoints for bookmark summary lookup plus per-book save/delete so all clients of the same SonicBook instance can see the same progress.
+- [x] 30. **Sync player progress to the backend with local fallback:**
+  Load saved position from the backend when a book opens, keep legacy `localStorage` as fallback, and push throttled updates back to the server during playback.
+- [x] 31. **Render shared bookmark progress in both Local and Drive libraries:**
+  Use backend bookmark summary to paint progress/completed state for both local files and Drive streams, and make reset clear the shared bookmark too.
+- [x] 33. **Make `book_id` collision-resistant with backward-compatible bookmark fallback:**
+  Replace the fragile basename-only identity with a size-aware `book_id`, while preserving reads and deletes of older bookmark keys so existing progress is not lost.
+- [x] 34. **Stop Drive imported-state from loading the full local library:**
+  Add a lightweight backend endpoint that returns only imported local `book_id`s and use it in the Drive library instead of calling the heavier `/api/library` endpoint on every refresh.
+
+## Library Performance
+
+- [x] 35. **Add a persistent library index for cached metadata:**
+  Store per-book library metadata in a JSON index and invalidate entries by file size, audio mtime, and sidecar mtime so unchanged books do not trigger repeated `ffprobe` and sidecar parsing on every load.
+- [x] 36. **Reuse the library index for lightweight imported-book lookups:**
+  Make imported-state queries reuse the same indexed snapshot instead of re-scanning and re-probing the full library separately.
+- [x] 37. **Add short-lived Drive library snapshot caching:**
+  Cache Google Drive folder listings on the backend for a short TTL so repeated Drive opens do not always wait on a live Google API round-trip.
+- [x] 38. **Add explicit Drive refresh control in the library header:**
+  Keep normal Drive browsing fast via cached snapshots, but expose a manual refresh action so the user can force a live reload whenever needed.

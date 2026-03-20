@@ -1,8 +1,128 @@
 let playerState = {
-    mode: 'single', duration: 0, chapters: [], playlist: [], currentTrackIndex: 0, fileName: null, bookTitle: "", tempCoverUrl: null
+    mode: 'single', duration: 0, chapters: [], playlist: [], currentTrackIndex: 0, fileName: null, bookTitle: "", tempCoverUrl: null, source: 'local', streamUrl: null, bookmarkKey: null, bookId: null
 };
 
 const audio = document.getElementById('audioElement');
+let bookmarkSyncTimer = null;
+
+function getCurrentDriveStreamFileId() {
+    if (!playerState.streamUrl) {
+        return '';
+    }
+    const match = playerState.streamUrl.match(/\/api\/google-drive\/files\/([^/]+)\/stream$/);
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+function setDriveStreamBuffering(fileId, isBuffering = true, syncStatus = true) {
+    appState.driveStreamBufferingFileId = isBuffering ? (fileId || '') : '';
+    if (syncStatus) {
+        if (isBuffering && appState.driveStreamBufferingFileId) {
+            setStatusMessage(i18n[appState.currentLang].googleDriveBuffering, 'info');
+        } else if (playerState.source === 'google_drive') {
+            clearStatusMessage();
+        }
+    }
+    syncLibraryPlayIcons();
+}
+
+function readLegacyBookmark(bookmarkKey) {
+    if (!bookmarkKey) {
+        return null;
+    }
+    try {
+        const raw = localStorage.getItem(bookmarkKey);
+        if (raw && !raw.startsWith('{')) {
+            return { time: parseFloat(raw), track: 0 };
+        }
+        return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+        localStorage.removeItem(bookmarkKey);
+        return null;
+    }
+}
+
+async function loadSavedBookmark(bookId, bookmarkKey) {
+    const legacyBookmark = readLegacyBookmark(bookmarkKey);
+    if (!bookId) {
+        return legacyBookmark;
+    }
+    const cachedBookmark = getCachedBookmark(bookId);
+    if (cachedBookmark && cachedBookmark.time) {
+        return cachedBookmark;
+    }
+    const fileName = playerState.fileName || '';
+    const unsizedBookmark = fileName ? getCachedBookmark(buildClientBookId(fileName)) : null;
+    if (unsizedBookmark && unsizedBookmark.time) {
+        return unsizedBookmark;
+    }
+    const legacyServerBookmark = fileName ? getCachedBookmark(buildLegacyClientBookId(fileName)) : null;
+    if (legacyServerBookmark && legacyServerBookmark.time) {
+        return legacyServerBookmark;
+    }
+    try {
+        const res = await fetch(`/api/bookmarks/${encodeURIComponent(bookId)}`);
+        const data = await res.json();
+        if (res.ok && data.bookmark && data.bookmark.time) {
+            appState.bookmarks[bookId] = data.bookmark;
+            return data.bookmark;
+        }
+    } catch (e) {}
+    return legacyBookmark;
+}
+
+function cacheBookmarkState(bookmark) {
+    if (!playerState.bookId || !bookmark) {
+        return;
+    }
+    appState.bookmarks[playerState.bookId] = bookmark;
+}
+
+async function flushBookmarkSync(keepalive = false) {
+    if (bookmarkSyncTimer) {
+        clearTimeout(bookmarkSyncTimer);
+        bookmarkSyncTimer = null;
+    }
+    if (!playerState.bookId || !playerState.duration) {
+        return;
+    }
+    const payload = {
+        time: audio.currentTime,
+        duration: audio.duration,
+        track: playerState.currentTrackIndex,
+        file_name: playerState.fileName || '',
+        source: playerState.source || ''
+    };
+    cacheBookmarkState(payload);
+    try {
+        const res = await fetch(`/api/bookmarks/${encodeURIComponent(playerState.bookId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            keepalive
+        });
+        const data = await res.json();
+        if (res.ok && data.bookmark) {
+            cacheBookmarkState(data.bookmark);
+        }
+    } catch (e) {}
+}
+
+function scheduleBookmarkSync(immediate = false) {
+    if (!playerState.bookId) {
+        return;
+    }
+    if (immediate) {
+        void flushBookmarkSync(true);
+        return;
+    }
+    if (bookmarkSyncTimer) {
+        return;
+    }
+    bookmarkSyncTimer = window.setTimeout(() => {
+        bookmarkSyncTimer = null;
+        void flushBookmarkSync();
+    }, 4000);
+}
 
 audio.addEventListener('timeupdate', () => {
     if (!playerState.duration) return;
@@ -49,13 +169,14 @@ audio.addEventListener('timeupdate', () => {
             });
         }
     }
-    if (playerState.fileName) {
-        localStorage.setItem('bookmark_' + playerState.fileName, JSON.stringify({
+    if (playerState.bookmarkKey) {
+        localStorage.setItem(playerState.bookmarkKey, JSON.stringify({
             time: audio.currentTime,
             duration: audio.duration,
             track: playerState.currentTrackIndex
         }));
     }
+    scheduleBookmarkSync(false);
 });
 
 audio.addEventListener('loadedmetadata', () => {
@@ -65,14 +186,6 @@ audio.addEventListener('loadedmetadata', () => {
         document.getElementById('markersContainer').innerHTML = playerState.chapters.map(ch =>
             `<div class="timeline-marker" style="left: ${(ch.start / audio.duration) * 100}%;" title="${ch.title}"></div>`
         ).join('');
-    }
-    if (playerState.fileName && !audio.autoplay) {
-        try {
-            const saved = JSON.parse(localStorage.getItem('bookmark_' + playerState.fileName));
-            if (saved && saved.time) {
-                audio.currentTime = Math.max(0, Math.min(audio.duration, parseFloat(saved.time)));
-            }
-        } catch (e) {}
     }
 });
 
@@ -95,14 +208,81 @@ audio.addEventListener('play', () => {
 audio.addEventListener('pause', () => {
     setPlayButtonState(false);
     syncLibraryPlayIcons();
+    scheduleBookmarkSync(true);
+});
+
+audio.addEventListener('playing', () => {
+    if (playerState.source === 'google_drive' && appState.driveStreamBufferingFileId) {
+        setDriveStreamBuffering('', false, true);
+    }
+});
+
+['waiting', 'stalled', 'loadstart'].forEach((eventName) => {
+    audio.addEventListener(eventName, () => {
+        if (playerState.source !== 'google_drive') {
+            return;
+        }
+        const driveFileId = getCurrentDriveStreamFileId();
+        if (driveFileId) {
+            setDriveStreamBuffering(driveFileId, true, true);
+        }
+    });
+});
+
+audio.addEventListener('error', () => {
+    if (playerState.source !== 'google_drive') {
+        return;
+    }
+    setDriveStreamBuffering('', false, false);
+    setStatusMessage(i18n[appState.currentLang].googleDriveStreamError, 'error');
+});
+
+window.addEventListener('beforeunload', () => {
+    scheduleBookmarkSync(true);
 });
 
 function syncLibraryPlayIcons() {
-    document.querySelectorAll('.library-quick-play').forEach(el => el.innerText = '▶');
+    const t = i18n[appState.currentLang];
+    document.querySelectorAll('.library-quick-play').forEach(el => {
+        el.innerText = '▶';
+        el.title = 'Play / Pause';
+        el.classList.remove('is-active');
+        el.setAttribute('aria-pressed', 'false');
+    });
+    document.querySelectorAll('.library-quick-stream').forEach(el => {
+        el.innerText = t.googleDriveStream || 'Stream';
+        el.title = t.googleDriveStreamTooltip || t.googleDriveStream || 'Stream';
+        el.classList.remove('is-active', 'is-buffering');
+        el.setAttribute('aria-pressed', 'false');
+        el.setAttribute('aria-busy', 'false');
+    });
+    if (appState.driveStreamBufferingFileId) {
+        const bufferingEl = document.getElementById(buildLibraryPlayButtonId('google_drive', appState.driveStreamBufferingFileId));
+        if (bufferingEl) {
+            bufferingEl.innerText = t.googleDriveBufferingShort || 'Buffering...';
+            bufferingEl.title = t.googleDriveBuffering || bufferingEl.innerText;
+            bufferingEl.classList.add('is-buffering');
+            bufferingEl.setAttribute('aria-busy', 'true');
+        }
+    }
     if (!audio.paused && playerState.fileName) {
-        const id = "lib-play-" + playerState.fileName.replace(/'/g, "\\'").replace(/\s+/g, '-');
+        const id = playerState.source === 'google_drive'
+            ? buildLibraryPlayButtonId('google_drive', getCurrentDriveStreamFileId())
+            : buildLibraryPlayButtonId('local', playerState.fileName);
         const el = document.getElementById(id);
-        if (el) el.innerText = '⏸';
+        if (el) {
+            if (playerState.source === 'google_drive') {
+                el.innerText = t.googleDrivePause || 'Pause';
+                el.title = t.googleDrivePause || 'Pause';
+                el.classList.add('is-active');
+                el.setAttribute('aria-pressed', 'true');
+            } else {
+                el.innerText = '⏸';
+                el.title = 'Play / Pause';
+                el.classList.add('is-active');
+                el.setAttribute('aria-pressed', 'true');
+            }
+        }
     }
 }
 
@@ -255,7 +435,8 @@ function initPlayerChapterInteractions() {
 function playCurrentTrack(autoplay = false) {
     if (!playerState.playlist.length) return;
     const track = playerState.playlist[playerState.currentTrackIndex];
-    audio.src = '/api/files/' + track.file.split('/').map(p => encodeURIComponent(p)).join('/');
+    const trackUrl = track.url || ('/api/files/' + track.file.split('/').map(p => encodeURIComponent(p)).join('/'));
+    audio.src = trackUrl;
     audio.autoplay = autoplay;
     audio.load();
     if (autoplay) setPlayButtonState(true);
@@ -267,11 +448,16 @@ function playCurrentTrack(autoplay = false) {
 
 async function initPlayer(fileName, autoOpenChapters = false) {
     const t = i18n[appState.currentLang];
+    setDriveStreamBuffering('', false, false);
     playerState.fileName = fileName;
     playerState.chapters = [];
     playerState.playlist = [];
     playerState.currentTrackIndex = 0;
     playerState.mode = 'single';
+    playerState.source = 'local';
+    playerState.streamUrl = null;
+    playerState.bookmarkKey = 'bookmark_' + fileName;
+    playerState.bookId = buildClientBookId(fileName);
     appState.showPlayer = true;
     appState.showPreview = false;
     appState.previewLoading = false;
@@ -291,19 +477,16 @@ async function initPlayer(fileName, autoOpenChapters = false) {
     clearPlayerCover();
     coverImg.onload = schedulePlayerLayoutSync;
     audio.autoplay = false;
-    let savedBmk = null;
-    try {
-        const rawBmk = localStorage.getItem('bookmark_' + fileName);
-        if (rawBmk && !rawBmk.startsWith('{')) savedBmk = { time: parseFloat(rawBmk), track: 0 };
-        else if (rawBmk) savedBmk = JSON.parse(rawBmk);
-    } catch (e) {
-        localStorage.removeItem('bookmark_' + fileName);
-    }
+    let savedBmk = await loadSavedBookmark(playerState.bookId, playerState.bookmarkKey);
 
     try {
         const res = await fetch('/api/metadata/' + encodeURIComponent(fileName) + '?t=' + Date.now());
         if (res.ok) {
             const meta = await res.json();
+            if (meta.book_id) {
+                playerState.bookId = meta.book_id;
+                savedBmk = await loadSavedBookmark(playerState.bookId, playerState.bookmarkKey);
+            }
             if (meta.title) {
                 playerState.bookTitle = meta.title;
                 if (playerTitleEl) {
@@ -351,6 +534,81 @@ async function initPlayer(fileName, autoOpenChapters = false) {
             audio.currentTime = Math.max(0, Math.min(audio.duration, parseFloat(savedBmk.time)));
             audio.removeEventListener('loadedmetadata', onMeta);
         });
+    }
+    updateMediaSession();
+    syncMainSurfaceState();
+}
+
+async function initDrivePlayer(item, autoPlay = true, autoOpenChapters = false) {
+    const t = i18n[appState.currentLang];
+    playerState.fileName = item.name;
+    playerState.bookTitle = item.name;
+    playerState.chapters = [];
+    playerState.playlist = [];
+    playerState.currentTrackIndex = 0;
+    playerState.mode = 'single';
+    playerState.source = 'google_drive';
+    playerState.streamUrl = `/api/google-drive/files/${encodeURIComponent(item.drive_file_id)}/stream`;
+    playerState.bookmarkKey = `bookmark_drive_${item.drive_file_id}`;
+    playerState.bookId = item.book_id || buildClientBookId(item.name, item.size_bytes);
+    appState.showPlayer = true;
+    appState.showPreview = false;
+    appState.previewLoading = false;
+    document.getElementById('markersContainer').innerHTML = '';
+    updateUI();
+    clearPlayerCover();
+    setPanelCount(0);
+    setPlayButtonState(false);
+    const chaptersListEl = document.getElementById('playerChaptersList');
+    if (chaptersListEl && (document.getElementById('appContainer').classList.contains('panel-open') || autoOpenChapters)) {
+        chaptersListEl.innerHTML = renderPanelLoadingState(t.chaptersLoadingTitle, t.chaptersLoadingHint, 8, true);
+    }
+
+    let savedBmk = await loadSavedBookmark(playerState.bookId, playerState.bookmarkKey);
+
+    try {
+        const query = new URLSearchParams({
+            metadata_file_id: item.drive_metadata_file_id || '',
+            cover_file_id: item.drive_cover_file_id || '',
+        });
+        const res = await fetch(`/api/google-drive/metadata/${encodeURIComponent(item.drive_file_id)}?${query.toString()}`);
+        if (res.ok) {
+            const meta = await res.json();
+            if (meta.book_id) {
+                playerState.bookId = meta.book_id;
+                savedBmk = await loadSavedBookmark(playerState.bookId, playerState.bookmarkKey);
+            }
+            if (meta.title) {
+                playerState.bookTitle = meta.title;
+            }
+            if (meta.cover_url) {
+                setPlayerCover(meta.cover_url);
+            }
+            if (meta.chapters && meta.chapters.length > 0) {
+                playerState.mode = 'm4b';
+                playerState.chapters = meta.chapters;
+            }
+        }
+    } catch (e) {
+        console.log('No Google Drive metadata found', e);
+    }
+
+    syncChaptersPanel(autoOpenChapters);
+    schedulePlayerLayoutSync();
+    audio.src = playerState.streamUrl;
+    audio.autoplay = autoPlay;
+    audio.load();
+    if (savedBmk && savedBmk.time) {
+        audio.addEventListener('loadedmetadata', function onMeta() {
+            audio.currentTime = Math.max(0, Math.min(audio.duration, parseFloat(savedBmk.time)));
+            audio.removeEventListener('loadedmetadata', onMeta);
+        });
+    }
+    if (autoPlay) {
+        setTimeout(() => {
+            audio.play();
+            setPlayButtonState(true);
+        }, 250);
     }
     updateMediaSession();
     syncMainSurfaceState();

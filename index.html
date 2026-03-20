@@ -15,6 +15,11 @@
                     <div id="t-lib-title">My Library</div>
                     <span class="panel-count-badge timecode" id="libraryCountBadge" style="display: none;">0</span>
                 </div>
+                <div class="library-source-toggle" id="librarySourceToggle">
+                    <button type="button" class="library-source-btn active" id="librarySourceLocalBtn" onclick="setLibrarySource('local')">Local</button>
+                    <button type="button" class="library-source-btn" id="librarySourceDriveBtn" onclick="setLibrarySource('google_drive')">Drive</button>
+                    <button type="button" class="library-source-btn library-refresh-btn" id="libraryRefreshBtn" onclick="refreshCurrentLibrary()" title="Refresh" hidden>↻</button>
+                </div>
                 <label class="panel-search" aria-label="Search library">
                     <span class="panel-search-icon" aria-hidden="true">⌕</span>
                     <input type="text" id="libSearchInput" placeholder="Search..." onkeyup="filterLibrary()">
@@ -61,6 +66,19 @@
                                     <span id="currentPath" class="current-path">...</span>
                                     <button onclick="chooseFolder()" id="btn-change-folder" class="folder-btn">Change</button>
                                 </div>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-row-label" id="t-google-drive-label">Google Drive</div>
+                                <div class="settings-drive-status-line">
+                                    <span id="googleDriveStatusBadge" class="settings-status-badge settings-status-idle">Not connected</span>
+                                </div>
+                                <input type="text" id="googleDriveFolderInput" placeholder="Drive folder ID">
+                                <div class="settings-inline-actions settings-drive-actions">
+                                    <button class="settings-toggle-btn" id="googleDriveConnectBtn" onclick="connectGoogleDrive()">Connect</button>
+                                    <button class="settings-toggle-btn" id="googleDriveDisconnectBtn" onclick="disconnectGoogleDrive()" hidden>Disconnect</button>
+                                    <button class="settings-toggle-btn" id="googleDriveSaveFolderBtn" onclick="saveGoogleDriveFolder()">Save folder</button>
+                                </div>
+                                <div class="settings-hint" id="googleDriveHint">Connect your Google account and enter the folder ID that stores your audiobooks.</div>
                             </div>
                             <div class="settings-row settings-row-danger">
                                 <button class="settings-danger-btn" id="resetAllDataBtn" onclick="resetAllData()">Clear all app data &amp; cache</button>

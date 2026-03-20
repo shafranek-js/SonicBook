@@ -55,7 +55,35 @@ To run SonicBook correctly, you need the following system components and librari
 
 5.  If FFmpeg is not in PATH, set `FFMPEG_PATH` and `FFPROBE_PATH` before launch.
 
+    You can also place overrides into a local `.env` file in the project root. See [`.env.example`](/C:/Projects/SonicBook/.env.example).
+
 6.  Open your browser and navigate to `http://localhost:8000`.
+
+## ☁️ Google Drive
+
+SonicBook can now connect to Google Drive without requiring the desktop Google Drive sync app.
+
+What already works:
+-   Connect a Google account through OAuth
+-   Save a Drive `folderId` in `Settings`
+-   Browse audiobook files from that Drive folder in the left library panel
+-   Import a selected Drive book into the local SonicBook library
+-   Stream supported remote audio files through the backend proxy
+
+### Configuration
+
+1.  Copy [`.env.example`](/C:/Projects/SonicBook/.env.example) to `.env`
+2.  Fill in:
+    -   `GOOGLE_DRIVE_CLIENT_ID`
+    -   `GOOGLE_DRIVE_CLIENT_SECRET`
+    -   optionally `GOOGLE_DRIVE_REDIRECT_URI`
+3.  Restart SonicBook
+4.  Open `Settings` and use `Connect Google Drive`
+
+Notes:
+-   The default redirect URI is `http://127.0.0.1:8000/api/google-drive/auth/callback`
+-   The Google OAuth client must allow that redirect URI
+-   Google Drive features stay disabled until these variables are configured
 
 ## 🔁 Cover Backfill
 

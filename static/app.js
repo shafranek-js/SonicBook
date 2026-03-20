@@ -7,6 +7,7 @@ const i18n = {
         statusDone: "Ready!", found: "Chapters found:", noChapters: "No chapters found. Will download as single file.",
         modeSingle: "Single File", modeM4B: "M4B (Chapters)", modeZIP: "ZIP (Split)",
         saveTo: "Save to:", changeBtn: "Change", libTitle: "My Library", libEmpty: "Your library is empty.",
+        librarySourceLocal: "Local", librarySourceDrive: "Drive",
         tocTitle: "Table of Contents", noChaptersInPanel: "No chapters available for this book.",
         groupNowListening: "Now Listening", groupQueue: "In Queue", groupCompleted: "Completed",
         libEmptyHint: "Downloaded books will appear here once they are available locally.",
@@ -28,6 +29,37 @@ const i18n = {
         progressDownloading: "Downloading",
         progressAssembling: "Assembling",
         libTooltip: "Library", themeTooltip: "Theme", langTooltip: "Language", settingsTooltip: "Settings", settingsTitle: "Settings", clearAllDataBtn: "Clear all app data & cache", languageLabel: "Language", downloadAnotherTooltip: "Download another",
+        googleDriveLabel: "Google Drive",
+        googleDriveFolderPlaceholder: "Drive folder ID",
+        googleDriveHint: "Connect your Google account and enter the folder ID that stores your audiobooks.",
+        googleDriveConnect: "Connect",
+        googleDriveDisconnect: "Disconnect",
+        googleDriveSaveFolder: "Save folder",
+        googleDriveStatusConnected: "Connected",
+        googleDriveStatusDisconnected: "Not connected",
+        googleDriveStatusNotConfigured: "Not configured",
+        googleDriveStatusConnecting: "Connecting...",
+        googleDriveStatusSaving: "Saving...",
+        googleDriveFolderSaved: "Google Drive folder saved.",
+        googleDriveDisconnected: "Google Drive disconnected.",
+        googleDriveImport: "Import",
+        googleDriveImporting: "Importing from Google Drive...",
+        googleDriveImportingShort: "Importing...",
+        googleDriveImported: "Imported into local library.",
+        googleDriveImportedShort: "Imported",
+        googleDriveStream: "Stream",
+        googleDrivePause: "Pause",
+        googleDriveBuffering: "Buffering stream...",
+        googleDriveBufferingShort: "Buffering...",
+        googleDriveStreamError: "Google Drive stream could not start.",
+        googleDriveStreamTooltip: "Stream from Google Drive without importing",
+        googleDriveRefresh: "Refresh",
+        googleDriveRefreshing: "Refreshing Drive library...",
+        googleDriveLibraryTitle: "Google Drive Library",
+        googleDriveLibraryEmpty: "No supported audiobook files found in the configured Drive folder.",
+        googleDriveLibraryHint: "Connect Google Drive and save a folder ID to browse remote books here.",
+        googleDriveLibraryError: "Could not load Google Drive library",
+        googleDriveLibraryErrorHint: "Check the account connection, folder ID, or Google API configuration.",
         chaptersTooltip: "Show or hide chapter list",
         chapterCountShort: "ch",
         resetTooltip: "Reset playback progress",
@@ -41,6 +73,7 @@ const i18n = {
         statusDone: "Готово!", found: "Найденные главы:", noChapters: "Главы не найдены. Будет скачано одним файлом.",
         modeSingle: "Одним файлом", modeM4B: "M4B (Главы)", modeZIP: "ZIP (Нарезка)",
         saveTo: "Сохранять в:", changeBtn: "Изменить", libTitle: "Моя Библиотека", libEmpty: "Библиотека пуста.",
+        librarySourceLocal: "Локально", librarySourceDrive: "Drive",
         tocTitle: "Оглавление", noChaptersInPanel: "Для этой книги нет списка глав.",
         groupNowListening: "Слушаю сейчас", groupQueue: "В очереди", groupCompleted: "Завершено",
         libEmptyHint: "Скачанные книги появятся здесь, как только будут доступны локально.",
@@ -62,6 +95,37 @@ const i18n = {
         progressDownloading: "Загрузка",
         progressAssembling: "Сборка",
         libTooltip: "Библиотека", themeTooltip: "Тема", langTooltip: "Язык", settingsTooltip: "Настройки", settingsTitle: "Настройки", clearAllDataBtn: "Очистить все данные приложения и кэш", languageLabel: "Язык", downloadAnotherTooltip: "Загрузить еще одну",
+        googleDriveLabel: "Google Drive",
+        googleDriveFolderPlaceholder: "ID папки Drive",
+        googleDriveHint: "Подключите Google-аккаунт и укажите ID папки, где лежат аудиокниги.",
+        googleDriveConnect: "Подключить",
+        googleDriveDisconnect: "Отключить",
+        googleDriveSaveFolder: "Сохранить папку",
+        googleDriveStatusConnected: "Подключено",
+        googleDriveStatusDisconnected: "Не подключено",
+        googleDriveStatusNotConfigured: "Не настроено",
+        googleDriveStatusConnecting: "Подключение...",
+        googleDriveStatusSaving: "Сохранение...",
+        googleDriveFolderSaved: "Папка Google Drive сохранена.",
+        googleDriveDisconnected: "Google Drive отключен.",
+        googleDriveImport: "Импорт",
+        googleDriveImporting: "Импорт из Google Drive...",
+        googleDriveImportingShort: "Импорт...",
+        googleDriveImported: "Книга импортирована в локальную библиотеку.",
+        googleDriveImportedShort: "Импортирована",
+        googleDriveStream: "Стрим",
+        googleDrivePause: "Пауза",
+        googleDriveBuffering: "Буферизация стрима...",
+        googleDriveBufferingShort: "Буферизация...",
+        googleDriveStreamError: "Не удалось запустить стрим из Google Drive.",
+        googleDriveStreamTooltip: "Слушать из Google Drive без импорта",
+        googleDriveRefresh: "Обновить",
+        googleDriveRefreshing: "Обновление библиотеки Drive...",
+        googleDriveLibraryTitle: "Библиотека Google Drive",
+        googleDriveLibraryEmpty: "В выбранной папке Drive не найдено поддерживаемых аудиокниг.",
+        googleDriveLibraryHint: "Подключите Google Drive и сохраните ID папки, чтобы видеть удалённые книги здесь.",
+        googleDriveLibraryError: "Не удалось загрузить библиотеку Google Drive",
+        googleDriveLibraryErrorHint: "Проверьте подключение, ID папки или настройки Google API.",
         chaptersTooltip: "Показать или скрыть список глав",
         chapterCountShort: "гл.",
         resetTooltip: "Сбросить прогресс прослушивания",
@@ -72,6 +136,7 @@ const i18n = {
 const appState = {
     currentLang: localStorage.getItem('lang') || 'en',
     currentMode: localStorage.getItem('mode') || 'm4b',
+    librarySource: localStorage.getItem('library-source') || 'local',
     step: 'start',
     playerReturnState: null,
     activeDownloadTask: null,
@@ -84,7 +149,18 @@ const appState = {
         visible: false,
         message: '',
         tone: 'info'
-    }
+    },
+    googleDrive: {
+        configured: false,
+        connected: false,
+        folderId: '',
+        accountEmail: '',
+        accountName: '',
+        loading: false,
+        refreshingLibrary: false
+    },
+    driveStreamBufferingFileId: '',
+    bookmarks: {}
 };
 let playerLayoutFrame = null;
 let mainDragDepth = 0;
@@ -109,6 +185,52 @@ function renderSkeletonRows(count = 6, compact = false) {
         '</div>'
     )).join('');
     return '<div class="skeleton-stack">' + rows + '</div>';
+}
+
+function normalizeBookNameForId(name) {
+    const base = String(name || '').replace(/\.[^.]+$/, '').toLowerCase();
+    return base.replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function buildClientBookId(name, sizeBytes = 0) {
+    const normalized = normalizeBookNameForId(name);
+    if (!normalized) {
+        return '';
+    }
+    const safeSize = Number(sizeBytes) || 0;
+    return safeSize > 0 ? `book:file:${normalized}:${safeSize}` : `book:file:${normalized}`;
+}
+
+function buildLegacyClientBookId(name) {
+    const normalized = normalizeBookNameForId(name);
+    return normalized ? `book:${normalized}` : '';
+}
+
+function buildLibraryPlayButtonId(source, identifier) {
+    const safeSource = source === 'google_drive' ? 'drive' : 'local';
+    const safeIdentifier = encodeURIComponent(String(identifier || ''));
+    return `lib-play-${safeSource}-${safeIdentifier}`;
+}
+
+async function loadBookmarkSummary() {
+    try {
+        const res = await fetch('/api/bookmarks');
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'bookmarks');
+        }
+        appState.bookmarks = data.bookmarks || {};
+    } catch (e) {
+        appState.bookmarks = {};
+    }
+    return appState.bookmarks;
+}
+
+function getCachedBookmark(bookId) {
+    if (!bookId) {
+        return null;
+    }
+    return appState.bookmarks[bookId] || null;
 }
 
 function renderPanelEmptyState(icon, title, subtitle = '', tone = '') {
@@ -379,12 +501,26 @@ function updateUI() {
     document.getElementById('settingsLangBtn').innerText = appState.currentLang === 'en' ? 'RU' : 'EN';
     document.getElementById('t-found').innerText = t.found;
     document.getElementById('t-language-label').innerText = t.languageLabel;
+    document.getElementById('t-google-drive-label').innerText = t.googleDriveLabel;
     document.getElementById('t-save-path').innerText = t.saveTo;
     document.getElementById('t-settings-title').innerText = t.settingsTitle;
     document.getElementById('btn-change-folder').innerText = t.changeBtn;
     document.getElementById('resetAllDataBtn').innerText = t.clearAllDataBtn;
+    document.getElementById('googleDriveFolderInput').placeholder = t.googleDriveFolderPlaceholder;
+    document.getElementById('googleDriveHint').innerText = t.googleDriveHint;
+    document.getElementById('googleDriveConnectBtn').innerText = t.googleDriveConnect;
+    document.getElementById('googleDriveDisconnectBtn').innerText = t.googleDriveDisconnect;
+    document.getElementById('googleDriveSaveFolderBtn').innerText = t.googleDriveSaveFolder;
+    const libraryRefreshBtn = document.getElementById('libraryRefreshBtn');
+    if (libraryRefreshBtn) {
+        libraryRefreshBtn.innerText = '↻';
+        libraryRefreshBtn.title = t.googleDriveRefresh;
+        libraryRefreshBtn.setAttribute('aria-label', t.googleDriveRefresh);
+    }
     document.getElementById('t-lib-title').innerText = t.libTitle;
     document.getElementById('t-panel-title').innerText = t.tocTitle;
+    document.getElementById('librarySourceLocalBtn').innerText = t.librarySourceLocal;
+    document.getElementById('librarySourceDriveBtn').innerText = t.librarySourceDrive;
     const playerChaptersBtn = document.getElementById('btn-player-chapters');
     if (playerChaptersBtn) {
         playerChaptersBtn.innerText = '📑 ' + (appState.currentLang === 'en' ? 'Chapters' : 'Главы');
@@ -403,6 +539,8 @@ function updateUI() {
     document.getElementById('settingsBtn').setAttribute('aria-label', t.settingsTooltip);
     document.getElementById('settingsLangBtn').title = t.langTooltip;
     document.getElementById('settingsLangBtn').setAttribute('aria-label', t.langTooltip);
+    syncGoogleDriveSettingsUI();
+    syncLibrarySourceUI();
 
     const btn = document.getElementById('mainBtn');
     const toolbarDownloadBtn = document.getElementById('downloadAnotherBtn');
@@ -486,6 +624,78 @@ function updateUI() {
     syncMainSurfaceState();
 }
 
+function syncGoogleDriveSettingsUI() {
+    const badge = document.getElementById('googleDriveStatusBadge');
+    const folderInput = document.getElementById('googleDriveFolderInput');
+    const connectBtn = document.getElementById('googleDriveConnectBtn');
+    const disconnectBtn = document.getElementById('googleDriveDisconnectBtn');
+    const saveFolderBtn = document.getElementById('googleDriveSaveFolderBtn');
+    const t = i18n[appState.currentLang];
+    if (!badge || !folderInput || !connectBtn || !disconnectBtn || !saveFolderBtn) {
+        return;
+    }
+
+    folderInput.value = appState.googleDrive.folderId || '';
+    badge.className = 'settings-status-badge';
+    let statusText = t.googleDriveStatusDisconnected;
+    if (!appState.googleDrive.configured) {
+        badge.classList.add('settings-status-warning');
+        statusText = t.googleDriveStatusNotConfigured;
+    } else if (appState.googleDrive.connected) {
+        badge.classList.add('settings-status-success');
+        statusText = appState.googleDrive.accountEmail || appState.googleDrive.accountName || t.googleDriveStatusConnected;
+    } else if (appState.googleDrive.loading) {
+        badge.classList.add('settings-status-pending');
+        statusText = t.googleDriveStatusConnecting;
+    } else {
+        badge.classList.add('settings-status-idle');
+        statusText = t.googleDriveStatusDisconnected;
+    }
+    badge.innerText = statusText;
+
+    connectBtn.hidden = !appState.googleDrive.configured || appState.googleDrive.connected;
+    disconnectBtn.hidden = !appState.googleDrive.connected;
+    const disableMutations = appState.googleDrive.loading || !appState.googleDrive.configured;
+    connectBtn.disabled = disableMutations;
+    disconnectBtn.disabled = appState.googleDrive.loading;
+    saveFolderBtn.disabled = disableMutations;
+    folderInput.disabled = disableMutations;
+}
+
+function syncLibrarySourceUI() {
+    const localBtn = document.getElementById('librarySourceLocalBtn');
+    const driveBtn = document.getElementById('librarySourceDriveBtn');
+    const refreshBtn = document.getElementById('libraryRefreshBtn');
+    if (!localBtn || !driveBtn) {
+        return;
+    }
+    localBtn.classList.toggle('active', appState.librarySource === 'local');
+    driveBtn.classList.toggle('active', appState.librarySource === 'google_drive');
+    if (refreshBtn) {
+        refreshBtn.hidden = appState.librarySource !== 'google_drive';
+        refreshBtn.disabled = !!appState.googleDrive.refreshingLibrary;
+        refreshBtn.classList.toggle('is-spinning', !!appState.googleDrive.refreshingLibrary);
+    }
+}
+
+function setLibrarySource(source) {
+    if (!['local', 'google_drive'].includes(source)) {
+        return;
+    }
+    appState.librarySource = source;
+    localStorage.setItem('library-source', source);
+    syncLibrarySourceUI();
+    loadLibrary();
+}
+
+function refreshCurrentLibrary() {
+    if (appState.librarySource === 'google_drive') {
+        loadGoogleDriveLibrary(true);
+        return;
+    }
+    loadLibrary();
+}
+
 function hasReturnablePlayer() {
     return !!appState.playerReturnState && !!appState.playerReturnState.fileName && !appState.showPlayer;
 }
@@ -548,6 +758,98 @@ function initSettingsMenu() {
     });
 }
 
+async function loadGoogleDriveStatus() {
+    try {
+        const res = await fetch('/api/google-drive/status');
+        if (!res.ok) {
+            throw new Error('status');
+        }
+        const data = await res.json();
+        appState.googleDrive.configured = !!data.configured;
+        appState.googleDrive.connected = !!data.connected;
+        appState.googleDrive.folderId = data.folder_id || '';
+        appState.googleDrive.accountEmail = data.account_email || '';
+        appState.googleDrive.accountName = data.account_name || '';
+    } catch (e) {
+        appState.googleDrive.configured = false;
+        appState.googleDrive.connected = false;
+        appState.googleDrive.folderId = '';
+        appState.googleDrive.accountEmail = '';
+        appState.googleDrive.accountName = '';
+    } finally {
+        appState.googleDrive.loading = false;
+        updateUI();
+    }
+}
+
+async function connectGoogleDrive() {
+    const t = i18n[appState.currentLang];
+    appState.googleDrive.loading = true;
+    updateUI();
+    try {
+        const res = await fetch('/api/google-drive/auth/url');
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'auth-url');
+        }
+        window.open(data.auth_url, '_blank', 'noopener,noreferrer');
+        setStatusMessage(t.googleDriveStatusConnecting, 'info');
+    } catch (e) {
+        setStatusMessage(String(e.message || e), 'error');
+    } finally {
+        appState.googleDrive.loading = false;
+        updateUI();
+    }
+}
+
+async function disconnectGoogleDrive() {
+    const t = i18n[appState.currentLang];
+    appState.googleDrive.loading = true;
+    updateUI();
+    try {
+        const res = await fetch('/api/google-drive/disconnect', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'disconnect');
+        }
+        appState.googleDrive.connected = false;
+        appState.googleDrive.accountEmail = '';
+        appState.googleDrive.accountName = '';
+        setStatusMessage(t.googleDriveDisconnected, 'success');
+    } catch (e) {
+        setStatusMessage(String(e.message || e), 'error');
+    } finally {
+        appState.googleDrive.loading = false;
+        await loadGoogleDriveStatus();
+    }
+}
+
+async function saveGoogleDriveFolder() {
+    const t = i18n[appState.currentLang];
+    const folderInput = document.getElementById('googleDriveFolderInput');
+    const folderId = (folderInput?.value || '').trim();
+    appState.googleDrive.loading = true;
+    updateUI();
+    try {
+        const res = await fetch('/api/google-drive/folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder_id: folderId })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'save-folder');
+        }
+        appState.googleDrive.folderId = data.folder_id || '';
+        setStatusMessage(t.googleDriveFolderSaved, 'success');
+    } catch (e) {
+        setStatusMessage(String(e.message || e), 'error');
+    } finally {
+        appState.googleDrive.loading = false;
+        updateUI();
+    }
+}
+
 // Init logic
 window.addEventListener('DOMContentLoaded', () => {
     setPlayButtonState(false);
@@ -572,6 +874,7 @@ window.addEventListener('DOMContentLoaded', () => {
     initLibraryInteractions();
     initSettingsMenu();
     initDragAndDrop();
+    loadGoogleDriveStatus();
     schedulePlayerLayoutSync();
 });
 

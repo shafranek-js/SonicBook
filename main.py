@@ -3,10 +3,12 @@ import uuid
 import asyncio
 import logging
 import json
+import html
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 import uvicorn
 import aiofiles
+import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +20,8 @@ import processor
 import library_service
 import progress_service
 import zip_service
+import google_drive_service
+import bookmark_service
 
 # Setup logging
 logging.basicConfig(
@@ -91,6 +95,24 @@ class DownloadRequest(BaseModel):
     url: str
     mode: str = "m4b"
 
+
+class GoogleDriveFolderRequest(BaseModel):
+    folder_id: str = ""
+
+
+class GoogleDriveImportRequest(BaseModel):
+    file_id: str
+    metadata_file_id: str = ""
+    cover_file_id: str = ""
+
+
+class BookmarkUpdateRequest(BaseModel):
+    time: float = 0.0
+    duration: float = 0.0
+    track: int = 0
+    file_name: str = ""
+    source: str = ""
+
 async def cleanup_task():
     """Background task to remove old store entries (files are kept permanently)"""
     while True:
@@ -150,6 +172,132 @@ async def choose_folder():
             return {"status": "success", "folder": selected}
     
     return {"status": "cancelled", "folder": config.DOWNLOADS_DIR}
+
+
+@app.get("/api/google-drive/status")
+async def google_drive_status():
+    return google_drive_service.get_google_drive_status()
+
+
+@app.get("/api/google-drive/auth/url")
+async def google_drive_auth_url():
+    try:
+        return google_drive_service.build_google_drive_auth_url()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/google-drive/auth/callback", response_class=HTMLResponse)
+async def google_drive_auth_callback(code: str = "", state: str = "", error: str = "", error_description: str = ""):
+    if error:
+        message = html.escape(error_description or error)
+        return HTMLResponse(
+            f"<html><body><h2>Google Drive connection failed</h2><p>{message}</p></body></html>",
+            status_code=400,
+        )
+
+    try:
+        auth = await google_drive_service.exchange_code_for_google_tokens(code, state)
+    except Exception as exc:
+        logger.exception("Google Drive OAuth callback failed")
+        message = html.escape(str(exc))
+        return HTMLResponse(
+            f"<html><body><h2>Google Drive connection failed</h2><p>{message}</p></body></html>",
+            status_code=400,
+        )
+
+    account_name = html.escape(auth.get("account_name") or auth.get("account_email") or "Google account")
+    return HTMLResponse(
+        "<html><body>"
+        "<h2>Google Drive connected</h2>"
+        f"<p>Connected as {account_name}.</p>"
+        "<p>You can close this window and return to SonicBook.</p>"
+        "</body></html>"
+    )
+
+
+@app.post("/api/google-drive/disconnect")
+async def google_drive_disconnect():
+    if not google_drive_service.disconnect_google_drive():
+        raise HTTPException(status_code=500, detail="Failed to clear Google Drive auth settings")
+    return {"status": "success"}
+
+
+@app.post("/api/google-drive/folder")
+async def google_drive_save_folder(request: GoogleDriveFolderRequest):
+    try:
+        folder_id = google_drive_service.save_google_drive_folder_id(request.folder_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "success", "folder_id": folder_id}
+
+
+@app.get("/api/google-drive/library")
+async def google_drive_library(folder_id: str = "", refresh: bool = False):
+    try:
+        files = await google_drive_service.list_google_drive_library_files_cached(folder_id, force_refresh=refresh)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Google Drive library request failed")
+        raise HTTPException(status_code=502, detail="Google Drive API request failed") from exc
+    return {"files": files}
+
+
+@app.post("/api/google-drive/import")
+async def google_drive_import(request: GoogleDriveImportRequest):
+    try:
+        result = await google_drive_service.import_google_drive_file(
+            request.file_id,
+            request.metadata_file_id,
+            request.cover_file_id,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Google Drive import failed")
+        raise HTTPException(status_code=502, detail="Google Drive file download failed") from exc
+    return {"status": "success", **result}
+
+
+@app.get("/api/google-drive/metadata/{file_id}")
+async def google_drive_metadata(file_id: str, metadata_file_id: str = "", cover_file_id: str = ""):
+    try:
+        return await google_drive_service.build_google_drive_metadata(file_id, metadata_file_id, cover_file_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Google Drive metadata request failed")
+        raise HTTPException(status_code=502, detail="Google Drive metadata request failed") from exc
+
+
+@app.get("/api/google-drive/files/{file_id}/stream")
+async def google_drive_stream_file(file_id: str, request: Request):
+    try:
+        client, response, headers = await google_drive_service.open_google_drive_stream(
+            file_id,
+            request.headers.get("range", ""),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Google Drive stream request failed")
+        raise HTTPException(status_code=502, detail="Google Drive file stream failed") from exc
+
+    async def stream_generator():
+        try:
+            async for chunk in response.aiter_bytes():
+                yield chunk
+        finally:
+            await response.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        stream_generator(),
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.headers.get("content-type"),
+    )
 
 @app.post("/api/info")
 async def get_info(request: InfoRequest):
@@ -242,9 +390,40 @@ async def progress_stream(task_id: str, request: Request):
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
+
+@app.get("/api/bookmarks")
+async def get_bookmarks():
+    return {"bookmarks": bookmark_service.list_bookmarks()}
+
+
+@app.get("/api/bookmarks/{book_id:path}")
+async def get_bookmark(book_id: str):
+    return {"bookmark": bookmark_service.get_bookmark(book_id)}
+
+
+@app.post("/api/bookmarks/{book_id:path}")
+async def save_bookmark(book_id: str, request: BookmarkUpdateRequest):
+    try:
+        bookmark = bookmark_service.save_bookmark(book_id, request.model_dump())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "success", "bookmark": bookmark}
+
+
+@app.delete("/api/bookmarks/{book_id:path}")
+async def delete_bookmark(book_id: str):
+    if not bookmark_service.delete_bookmark(book_id):
+        raise HTTPException(status_code=500, detail="Failed to delete bookmark")
+    return {"status": "success"}
+
 @app.get("/api/library")
 async def get_library():
     return {"files": library_service.list_library_files(config.DOWNLOADS_DIR)}
+
+
+@app.get("/api/library/imported-book-ids")
+async def get_imported_book_ids():
+    return {"book_ids": library_service.list_library_book_ids(config.DOWNLOADS_DIR)}
 
 @app.get("/api/files/{file_name:path}")
 async def download_file(file_name: str):
@@ -261,12 +440,23 @@ async def get_metadata(file_name: str):
     
     # Handle ZIP files (Playlist mode)
     if file_name.endswith('.zip'):
-        return await zip_service.build_zip_metadata(file_path, file_name, config.DOWNLOADS_DIR)
+        payload = await zip_service.build_zip_metadata(file_path, file_name, config.DOWNLOADS_DIR)
+        if isinstance(payload, dict):
+            payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=os.path.getsize(file_path), metadata=payload)
+        return payload
 
     # Handle standard M4B/MP3 with JSON metadata
     json_path = os.path.join(os.path.dirname(file_path), f"{base_name}.json")
     if os.path.exists(json_path):
-        return FileResponse(path=json_path)
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict):
+                payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=os.path.getsize(file_path), metadata=payload)
+                return payload
+        except Exception:
+            logger.exception("Failed to read metadata sidecar: %s", json_path)
+            raise HTTPException(status_code=500, detail="Metadata read failed")
     raise HTTPException(status_code=404, detail="Metadata not found")
 
 if __name__ == "__main__":

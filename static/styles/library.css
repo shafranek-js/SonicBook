@@ -148,6 +148,93 @@
 .library-quick-play {
     color: var(--primary);
 }
+.library-quick-stream {
+    width: auto;
+    min-width: 72px;
+    padding: 0 14px;
+    color: #eef2ff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    border-color: rgba(99, 102, 241, 0.42);
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.92), rgba(79, 70, 229, 0.82));
+    box-shadow: 0 8px 18px rgba(79, 70, 229, 0.26);
+}
+.library-quick-stream:hover {
+    border-color: rgba(129, 140, 248, 0.58);
+    background: linear-gradient(180deg, rgba(129, 140, 248, 0.98), rgba(99, 102, 241, 0.9));
+    color: white;
+}
+.library-quick-stream.is-active {
+    color: #f8fafc;
+    border-color: rgba(34, 197, 94, 0.42);
+    background: linear-gradient(180deg, rgba(34, 197, 94, 0.92), rgba(22, 163, 74, 0.84));
+    box-shadow: 0 8px 18px rgba(22, 163, 74, 0.24);
+}
+.library-quick-stream.is-active:hover {
+    border-color: rgba(74, 222, 128, 0.54);
+    background: linear-gradient(180deg, rgba(74, 222, 128, 0.96), rgba(34, 197, 94, 0.88));
+}
+.library-quick-stream.is-buffering {
+    color: #f8fafc;
+    border-color: rgba(59, 130, 246, 0.42);
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.92), rgba(37, 99, 235, 0.84));
+    box-shadow: 0 8px 18px rgba(37, 99, 235, 0.24);
+}
+.library-quick-stream.is-buffering:hover {
+    border-color: rgba(96, 165, 250, 0.56);
+    background: linear-gradient(180deg, rgba(96, 165, 250, 0.96), rgba(59, 130, 246, 0.88));
+}
+.library-quick-import {
+    width: auto;
+    min-width: 0;
+    padding: 0 12px;
+    color: var(--primary);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+.library-quick-import.is-busy {
+    padding-left: 10px;
+    padding-right: 14px;
+}
+.library-quick-import.is-busy::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    margin-right: 7px;
+    border-radius: 999px;
+    border: 2px solid rgba(99, 102, 241, 0.24);
+    border-top-color: var(--primary);
+    animation: drive-import-spin 0.8s linear infinite;
+}
+.library-quick-import.is-done {
+    color: var(--success);
+    border-color: rgba(16, 185, 129, 0.22);
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.03));
+}
+.library-quick-import:disabled {
+    opacity: 1;
+    cursor: wait;
+}
+.drive-library-item {
+    cursor: default;
+}
+.drive-library-item.is-importing {
+    background: rgba(99, 102, 241, 0.08);
+}
+.drive-library-item.is-imported {
+    background: rgba(16, 185, 129, 0.06);
+}
+.drive-library-item .library-item-actions {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+}
+.drive-library-item .library-item-info {
+    margin-right: 12px;
+}
+@keyframes drive-import-spin {
+    to { transform: rotate(360deg); }
+}
 .library-group-items .library-item:last-child {
     border-bottom: none;
 }
@@ -266,6 +353,53 @@
     min-width: 0;
     flex-shrink: 0;
 }
+.library-source-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.03);
+}
+.library-source-btn {
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.library-refresh-btn {
+    min-width: 28px;
+    padding: 0 8px;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+.library-refresh-btn.is-spinning {
+    color: transparent;
+    cursor: wait;
+    opacity: 0.78;
+}
+.library-refresh-btn.is-spinning::before {
+    content: "";
+    width: 11px;
+    height: 11px;
+    border-radius: 999px;
+    border: 2px solid rgba(99, 102, 241, 0.24);
+    border-top-color: var(--primary);
+    animation: drive-import-spin 0.8s linear infinite;
+}
+.library-source-btn.active {
+    background: rgba(99, 102, 241, 0.14);
+    color: var(--primary);
+}
+.library-source-btn:hover {
+    color: var(--text);
+}
 .panel-count-badge {
     align-items: center;
     justify-content: center;
@@ -306,6 +440,13 @@ body.light-theme .panel-search {
 body.light-theme .panel-search:focus-within {
     border-color: rgba(99, 102, 241, 0.38);
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+body.light-theme .library-source-toggle {
+    border-color: rgba(148, 163, 184, 0.24);
+    background: rgba(255,255,255,0.92);
+}
+body.light-theme .library-quick-stream {
+    color: white;
 }
 .panel-search-icon {
     color: var(--muted);
