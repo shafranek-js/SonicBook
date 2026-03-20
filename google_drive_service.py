@@ -1,11 +1,12 @@
 import os
+import re
 import secrets
 import shutil
 import time
 import uuid
 import json
 from datetime import datetime
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, parse_qs
 
 import httpx
 
@@ -32,6 +33,7 @@ _oauth_state_store = {}
 _drive_library_cache = {}
 SUPPORTED_AUDIO_EXTENSIONS = {".m4b", ".mp3", ".m4a", ".mp4", ".zip"}
 SUPPORTED_COVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+GOOGLE_DRIVE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _now_ts():
@@ -200,10 +202,42 @@ def disconnect_google_drive():
     return config.clear_google_drive_auth()
 
 
+def extract_google_drive_folder_id(value: str):
+    raw_value = (value or "").strip()
+    if not raw_value:
+        return ""
+
+    if GOOGLE_DRIVE_ID_PATTERN.match(raw_value):
+        return raw_value
+
+    candidate = raw_value
+    if "://" not in candidate and candidate.startswith("drive.google.com/"):
+        candidate = f"https://{candidate}"
+
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError("Enter a valid Google Drive folder ID or shared folder link.")
+
+    if "drive.google.com" not in parsed.netloc.lower():
+        raise RuntimeError("Only Google Drive shared folder links are supported here.")
+
+    query = parse_qs(parsed.query)
+    query_id = (query.get("id") or query.get("folder_id") or [""])[0].strip()
+    if query_id and GOOGLE_DRIVE_ID_PATTERN.match(query_id):
+        return query_id
+
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    for index, segment in enumerate(segments):
+        if segment == "folders" and index + 1 < len(segments):
+            folder_id = segments[index + 1].strip()
+            if GOOGLE_DRIVE_ID_PATTERN.match(folder_id):
+                return folder_id
+
+    raise RuntimeError("Could not extract a Google Drive folder ID from the provided link.")
+
+
 def save_google_drive_folder_id(folder_id: str):
-    clean_folder_id = (folder_id or "").strip()
-    if clean_folder_id and "/" in clean_folder_id:
-        raise RuntimeError("Folder ID must be a Google Drive folder identifier, not a URL.")
+    clean_folder_id = extract_google_drive_folder_id(folder_id)
     _drive_library_cache.clear()
     if not config.save_google_drive_folder_id(clean_folder_id):
         raise RuntimeError("Failed to persist Google Drive folder ID.")

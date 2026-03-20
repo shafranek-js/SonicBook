@@ -1,5 +1,27 @@
 **Phase 2 UX/UI Implementation Brief**
 
+### Status Snapshot (March 20, 2026)
+Phase 2 is no longer only a plan. A substantial part of the UI and UX work described below has already shipped.
+
+Already implemented:
+- Top toolbar simplification and player-mode compaction
+- Unified visual system across player, library, chapter panel, and center states
+- Monospaced time displays
+- Gradient scroll masks
+- Skeleton loading states and richer empty states
+- Grouped library views (`Now Listening`, `In Queue`, `Completed`) for both Local and Drive
+- Restrained hover/context actions in the library
+- Drag-and-drop link affordance
+- Google Drive library source with `Stream`, `Import`, shared progress, and visible import state
+- Shared server-side bookmark sync across Local and Drive
+- Local library metadata indexing for much faster list loading
+- Short-lived Drive snapshot caching plus manual refresh
+
+Still intentionally not implemented:
+- Waveform timeline
+- decorative depth effects beyond the current system
+- advanced multi-action hover clusters
+
 ### 1. Objective
 Phase 2 improves the product from a good utility UI into a polished desktop audiobook application. The focus is not new platform capability, but consistency, hierarchy, perceived quality, and better day-to-day usability.
 
@@ -44,6 +66,9 @@ Replace generic empty/loading states in library and chapter lists with compact s
 - Contextual hover actions.
 Library items should reveal quick actions on hover, but only the most important ones. Start with `Play` and one secondary action at most.
 
+Status:
+- Completed.
+
 #### P2: Ship After P1 Is Stable
 These items are useful, but require more design discipline or supporting logic.
 
@@ -58,6 +83,10 @@ When dragging a file into the app, show a clear overlay or frame state that conf
 
 - Stronger list hierarchy.
 Refine metadata display, spacing, and row emphasis in library and chapter panels so primary information is easier to scan.
+
+Status:
+- Mostly completed.
+- The remaining work in this tier is now more about refinement than missing capability.
 
 #### P3: Explore, Do Not Commit Upfront
 These are optional, high-cost, or uncertain-value ideas. They should only be implemented if earlier phases are complete and performance remains strong.
@@ -97,9 +126,15 @@ Any extra glass, blur, glow, or motion should be treated as optional polish, not
 - Strengthen audiobook-first controls such as skip backward and skip forward.
 - Only replace the current progress bar with a waveform if the result is clearly better in usability and performance.
 
+Additional delivered scope:
+- Google Drive remote-library browsing, import, and direct streaming
+- Cross-device bookmark sync on the same SonicBook instance
+- Library performance indexing for local collections
+- Drive snapshot caching and explicit refresh control
+
 ### 6. Out of Scope
 - New media formats.
-- Cloud sync.
+- Full cloud sync across different SonicBook servers.
 - Social or sharing systems.
 - Major backend rearchitecture.
 - A full redesign of the app layout.
@@ -141,15 +176,26 @@ Do not add effects that degrade list scrolling, playback responsiveness, or star
 - Skeleton states
 - Minimal hover actions
 
+Status:
+- Completed.
+
 #### Phase 2B
 - Dynamic grouping
 - Context-aware top tools behavior
 - Better drag-and-drop feedback
 - Stronger list hierarchy polish
 
+Status:
+- Largely completed.
+- Follow-up work here is now polish, not foundational implementation.
+
 #### Phase 2C
 - Waveform prototype
 - Optional advanced polish if justified by performance and UX outcome
+
+Status:
+- Deferred.
+- Still intentionally gated behind performance and UX validation.
 
 ### 10. Acceptance Criteria
 A feature in this phase is done only if:
@@ -169,3 +215,8 @@ A feature in this phase is done only if:
 Ship P1 first and treat it as the real Phase 2.
 
 Do not start waveform work until the top area, library, chapter panel, loading states, and hover interactions are already coherent.
+
+Updated recommendation:
+- Treat the current app as being in late Phase 2B.
+- Focus next on polish, regression resistance, and performance rather than adding speculative visual features.
+- Keep waveform and similar high-cost ideas deferred until they clearly outperform the current seek UX.

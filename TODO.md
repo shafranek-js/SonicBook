@@ -210,3 +210,5 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   Cache Google Drive folder listings on the backend for a short TTL so repeated Drive opens do not always wait on a live Google API round-trip.
 - [x] 38. **Add explicit Drive refresh control in the library header:**
   Keep normal Drive browsing fast via cached snapshots, but expose a manual refresh action so the user can force a live reload whenever needed.
+- [x] 39. **Allow Google Drive folder setup from a shared link:**
+  Accept either a raw `folderId` or a full shared Google Drive folder URL in Settings and extract the canonical folder ID automatically before saving it.

@@ -238,9 +238,7 @@ button#mainBtn:disabled { opacity: 0.5; }
     padding: 12px;
     border-radius: 16px;
     border: 1px solid rgba(255,255,255,0.08);
-    background:
-        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)),
-        rgba(15, 23, 42, 0.96);
+    background: #162033;
     box-shadow: 0 18px 40px rgba(0,0,0,0.32);
     display: flex;
     flex-direction: column;
@@ -370,8 +368,11 @@ button#mainBtn:disabled { opacity: 0.5; }
         rgba(15, 23, 42, 0.14);
 }
 .main-card.player-session .controls-left,
-.main-card.player-session .controls,
 .main-card.player-session .toolbar-link {
+    opacity: 0.88;
+}
+.main-card.player-session .controls > .btn-icon,
+.main-card.player-session .controls > .settings-wrap > .settings-btn {
     opacity: 0.88;
 }
 .main-card.player-session #urlInput {
