@@ -6,6 +6,8 @@ import time
 
 import bookmark_service
 import config
+from json_storage import locked_json_path, read_json_unlocked, write_json_unlocked
+from service_models import LibraryFileRecordModel, LibraryIndexEntryModel
 
 logger = logging.getLogger(__name__)
 AUDIO_EXTENSIONS = ('.m4b', '.mp3', '.zip', '.mp4', '.m4a')
@@ -62,11 +64,15 @@ def load_sidecar_metadata(file_path: str) -> dict | None:
 
 
 def _load_library_index() -> dict:
+    with locked_json_path(LIBRARY_INDEX_FILE):
+        return _load_library_index_unlocked()
+
+
+def _load_library_index_unlocked() -> dict:
     if not os.path.exists(LIBRARY_INDEX_FILE):
         return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
     try:
-        with open(LIBRARY_INDEX_FILE, "r", encoding="utf-8") as f:
-            payload = json.load(f)
+        payload = read_json_unlocked(LIBRARY_INDEX_FILE, default={})
         if not isinstance(payload, dict):
             return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
         if int(payload.get("version") or 0) != LIBRARY_INDEX_VERSION:
@@ -74,23 +80,37 @@ def _load_library_index() -> dict:
         entries = payload.get("entries")
         if not isinstance(entries, dict):
             return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
-        return {"version": LIBRARY_INDEX_VERSION, "entries": entries}
+        normalized_entries = {}
+        for name, entry in entries.items():
+            if not isinstance(entry, dict):
+                continue
+            try:
+                normalized_entries[name] = LibraryIndexEntryModel.model_validate(entry).model_dump()
+            except Exception:
+                continue
+        return {"version": LIBRARY_INDEX_VERSION, "entries": normalized_entries}
     except Exception:
         logger.exception("Failed to read library index: %s", LIBRARY_INDEX_FILE)
         return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
 
 
 def _save_library_index(entries: dict):
+    with locked_json_path(LIBRARY_INDEX_FILE):
+        _save_library_index_unlocked(entries)
+
+
+def _save_library_index_unlocked(entries: dict):
     temp_path = LIBRARY_INDEX_FILE + ".tmp"
     payload = {
         "version": LIBRARY_INDEX_VERSION,
         "updated_at": time.time(),
-        "entries": entries,
+        "entries": {
+            name: LibraryIndexEntryModel.model_validate(entry).model_dump()
+            for name, entry in entries.items()
+        },
     }
     try:
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(temp_path, LIBRARY_INDEX_FILE)
+        write_json_unlocked(LIBRARY_INDEX_FILE, payload)
     except Exception:
         logger.exception("Failed to write library index: %s", LIBRARY_INDEX_FILE)
         if os.path.exists(temp_path):
@@ -116,73 +136,73 @@ def _build_file_record(name: str, file_path: str, size_bytes: int, mtime: float,
     if not duration_seconds:
         duration_seconds = get_file_duration_seconds(file_path)
 
-    return {
-        "name": name,
-        "book_id": bookmark_service.build_book_id(name, size_bytes=size_bytes, metadata=sidecar_meta),
-        "size_bytes": size_bytes,
-        "size_mb": size_mb,
-        "has_meta": has_meta,
-        "duration_seconds": duration_seconds,
-        "chapter_count": chapter_count,
-        "mtime": mtime,
-    }
+    return LibraryFileRecordModel(
+        name=name,
+        book_id=bookmark_service.build_book_id(name, size_bytes=size_bytes, metadata=sidecar_meta),
+        size_bytes=size_bytes,
+        size_mb=size_mb,
+        has_meta=has_meta,
+        duration_seconds=duration_seconds,
+        chapter_count=chapter_count,
+        mtime=mtime,
+    ).model_dump()
 
 
 def _scan_library(downloads_dir: str) -> list[dict]:
     if not os.path.exists(downloads_dir):
         return []
+    with locked_json_path(LIBRARY_INDEX_FILE):
+        cached_index = _load_library_index_unlocked()
+        cached_entries = cached_index.get("entries", {})
+        next_entries = {}
+        files = []
+        changed = False
 
-    cached_index = _load_library_index()
-    cached_entries = cached_index.get("entries", {})
-    next_entries = {}
-    files = []
-    changed = False
+        with os.scandir(downloads_dir) as iterator:
+            for entry in iterator:
+                if not entry.is_file() or not entry.name.endswith(AUDIO_EXTENSIONS):
+                    continue
 
-    with os.scandir(downloads_dir) as iterator:
-        for entry in iterator:
-            if not entry.is_file() or not entry.name.endswith(AUDIO_EXTENSIONS):
-                continue
+                stat = entry.stat()
+                size_bytes = stat.st_size
+                mtime = stat.st_mtime
+                mtime_ns = stat.st_mtime_ns
+                sidecar_path = _sidecar_json_path(entry.path)
+                sidecar_mtime_ns = 0
+                if os.path.exists(sidecar_path):
+                    sidecar_mtime_ns = os.stat(sidecar_path).st_mtime_ns
 
-            stat = entry.stat()
-            size_bytes = stat.st_size
-            mtime = stat.st_mtime
-            mtime_ns = stat.st_mtime_ns
-            sidecar_path = _sidecar_json_path(entry.path)
-            sidecar_mtime_ns = 0
-            if os.path.exists(sidecar_path):
-                sidecar_mtime_ns = os.stat(sidecar_path).st_mtime_ns
+                cached = cached_entries.get(entry.name)
+                cached_file = cached.get("file") if isinstance(cached, dict) else None
+                cache_hit = (
+                    isinstance(cached, dict)
+                    and isinstance(cached_file, dict)
+                    and int(cached.get("size_bytes") or 0) == size_bytes
+                    and int(cached.get("mtime_ns") or 0) == mtime_ns
+                    and int(cached.get("sidecar_mtime_ns") or 0) == sidecar_mtime_ns
+                )
 
-            cached = cached_entries.get(entry.name)
-            cached_file = cached.get("file") if isinstance(cached, dict) else None
-            cache_hit = (
-                isinstance(cached, dict)
-                and isinstance(cached_file, dict)
-                and int(cached.get("size_bytes") or 0) == size_bytes
-                and int(cached.get("mtime_ns") or 0) == mtime_ns
-                and int(cached.get("sidecar_mtime_ns") or 0) == sidecar_mtime_ns
-            )
+                if cache_hit:
+                    file_record = LibraryFileRecordModel.model_validate(cached_file).model_dump()
+                else:
+                    sidecar_meta = load_sidecar_metadata_from_path(sidecar_path) if sidecar_mtime_ns else None
+                    file_record = _build_file_record(entry.name, entry.path, size_bytes, mtime, sidecar_meta)
+                    changed = True
 
-            if cache_hit:
-                file_record = dict(cached_file)
-            else:
-                sidecar_meta = load_sidecar_metadata_from_path(sidecar_path) if sidecar_mtime_ns else None
-                file_record = _build_file_record(entry.name, entry.path, size_bytes, mtime, sidecar_meta)
-                changed = True
+                next_entries[entry.name] = LibraryIndexEntryModel(
+                    size_bytes=size_bytes,
+                    mtime_ns=mtime_ns,
+                    sidecar_mtime_ns=sidecar_mtime_ns,
+                    file=file_record,
+                ).model_dump()
+                files.append(file_record)
 
-            next_entries[entry.name] = {
-                "size_bytes": size_bytes,
-                "mtime_ns": mtime_ns,
-                "sidecar_mtime_ns": sidecar_mtime_ns,
-                "file": file_record,
-            }
-            files.append(file_record)
-
-    if set(cached_entries.keys()) != set(next_entries.keys()):
-        changed = True
-    if changed:
-        _save_library_index(next_entries)
-    files.sort(key=lambda x: x["mtime"], reverse=True)
-    return files
+        if set(cached_entries.keys()) != set(next_entries.keys()):
+            changed = True
+        if changed:
+            _save_library_index_unlocked(next_entries)
+        files.sort(key=lambda x: x["mtime"], reverse=True)
+        return files
 
 
 def list_library_files(downloads_dir: str) -> list[dict]:

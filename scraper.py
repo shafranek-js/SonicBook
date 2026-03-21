@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 def log_debug(message):
     logger.info(message)
 
+
+class ScraperError(RuntimeError):
+    pass
+
 # Persistent Playwright browser instance
 playwright_instance = None
 browser_instance = None
@@ -39,8 +43,15 @@ def parse_time_to_seconds(time_str):
         parts = time_str.split(":")
         if len(parts) == 2: return int(parts[0]) * 60 + int(parts[1])
         if len(parts) == 3: return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-    except: pass
+    except Exception:
+        pass
     return 0
+
+
+def _record_scrape_error(errors, stage, exc):
+    message = str(exc).strip() or exc.__class__.__name__
+    errors.append(f"{stage}: {message}")
+    log_debug(f"{stage} error: {message}")
 
 def extract_cover_url(soup, page_url):
     candidate_selectors = [
@@ -119,6 +130,7 @@ def extract_chapters_from_html(html_content):
 async def get_book_info(book_url):
     log_debug(f"Combined info scraping: {book_url}")
     res = {"m3u8": None, "title": "audiobook", "chapters": [], "cover": None}
+    scrape_errors = []
 
     # 0. МАРШРУТИЗАТОР: Обработка специфичных сайтов (например, knigavuhe.org)
     if "knigavuhe.org" in book_url:
@@ -157,8 +169,7 @@ async def get_book_info(book_url):
                         res["m3u8"] = "DIRECT_URLS:" + ",".join(direct_urls)
                         return res["m3u8"], res["title"], res["chapters"], res["cover"]
         except Exception as e:
-            log_debug(f"Knigavuhe parse error: {e}")
-            return None, "audiobook", [], None
+            _record_scrape_error(scrape_errors, "Knigavuhe parser", e)
 
     # Text-based parsing (Fast) для остальных сайтов
     try:
@@ -178,7 +189,8 @@ async def get_book_info(book_url):
                 res["cover"] = extract_cover_url(soup, book_url)
                     
                 res["chapters"] = extract_chapters_from_html(resp.text)
-    except Exception as e: log_debug(f"BS4 parse error: {e}")
+    except Exception as e:
+        _record_scrape_error(scrape_errors, "HTML parser", e)
 
     # Browser-based parsing (for m3u8)
     try:
@@ -200,7 +212,8 @@ async def get_book_info(book_url):
                         # Агрессивный клик через JS работает надежнее
                         await page.evaluate("document.querySelector('.button__player--play, .js-player-play')?.click()")
                         log_debug("Play clicked via JS")
-                    except: pass
+                    except Exception as exc:
+                        log_debug(f"Play click via JS failed: {exc}")
                 await asyncio.sleep(1)
 
             if not res["chapters"]:
@@ -285,7 +298,8 @@ async def get_book_info(book_url):
                             # Агрессивный клик через JS работает надежнее
                             await page.evaluate("document.querySelector('.button__player--play, .js-player-play')?.click()")
                             log_debug("Play clicked via JS")
-                        except: pass
+                        except Exception as exc:
+                            log_debug(f"Play click via JS failed: {exc}")
                     await asyncio.sleep(1)
 
                 if not res["chapters"]:
@@ -351,6 +365,10 @@ async def get_book_info(book_url):
                     res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
 
                 await browser.close()
-    except Exception as e: log_debug(f"Playwright error: {e}")
+    except Exception as e:
+        _record_scrape_error(scrape_errors, "Playwright scraper", e)
+
+    if not res["m3u8"] and scrape_errors:
+        raise ScraperError(scrape_errors[-1])
 
     return res["m3u8"], res["title"], res["chapters"], res["cover"]

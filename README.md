@@ -27,7 +27,7 @@ To run SonicBook correctly, you need the following system components and librari
     *   *macOS*: `brew install ffmpeg`
     *   *Linux*: `sudo apt install ffmpeg`
 3.  **Playwright (Chromium)**: A headless browser engine used for advanced scraping when direct HTML parsing fails.
-4.  **HTTP/2 Support (`httpx[http2]`)**: Required for high-speed scraping of specific sites without getting blocked.
+4.  **HTTP Client (`httpx`)**: Used for scraping, Drive access, and direct media downloads. SonicBook works with the pinned `httpx` dependency from `requirements.txt`; no separate extra install step is required.
 5.  **Aiofiles**: Used for efficient, non-blocking disk operations during downloads.
 
 ## 🚀 Quick Start
@@ -58,6 +58,32 @@ To run SonicBook correctly, you need the following system components and librari
     You can also place overrides into a local `.env` file in the project root. See [`.env.example`](/C:/Projects/SonicBook/.env.example).
 
 6.  Open your browser and navigate to `http://localhost:8000`.
+
+### Smoke Test
+
+To confirm that SonicBook starts correctly on Windows and the core endpoints respond:
+
+```powershell
+./smoke_test.ps1
+```
+
+This script checks:
+- app startup
+- `/`
+- `/api/settings/folder`
+- `/api/google-drive/status`
+
+### Automated Checks
+
+The repository now includes a minimal GitHub Actions pipeline in
+[`/.github/workflows/ci.yml`](/C:/Projects/SonicBook/.github/workflows/ci.yml)
+that runs:
+
+- `pytest` on Linux
+- `smoke_test.ps1` on Windows, including Playwright Chromium and FFmpeg setup
+
+Runtime note:
+- `httpx` is installed with the `http2` extra because the scraper and some remote fetch paths explicitly enable HTTP/2 clients.
 
 ## ☁️ Google Drive
 

@@ -212,3 +212,52 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   Keep normal Drive browsing fast via cached snapshots, but expose a manual refresh action so the user can force a live reload whenever needed.
 - [x] 39. **Allow Google Drive folder setup from a shared link:**
   Accept either a raw `folderId` or a full shared Google Drive folder URL in Settings and extract the canonical folder ID automatically before saving it.
+
+## Security and Reliability
+
+- [x] 40. **Harden ZIP playback extraction against unsafe archives:**
+  Replace raw `extractall()` with validated per-entry extraction that rejects path traversal, symlink entries, and oversized archives before unpacking into the playback cache.
+- [x] 41. **Declare BeautifulSoup explicitly in runtime dependencies:**
+  Add `beautifulsoup4` to `requirements.txt` so clean installs do not fail when `scraper.py` imports `bs4`.
+- [x] 42. **Move Google Drive OAuth secrets out of `settings.json`:**
+  Stop storing `access_token` and `refresh_token` in plaintext application settings; move them into a separate protected store such as Windows Credential Manager / DPAPI-backed storage.
+- [x] 43. **Persist background task progress across server restarts:**
+  Replace the in-memory `progress_store` with a small disk-backed store so long-running download task visibility survives process restarts and can be marked as interrupted instead of disappearing.
+- [x] 44. **Add active download guardrails at task creation:**
+  Reject unsupported download modes early and return a clear `429` when too many background downloads are already in flight instead of piling up unlimited concurrent jobs.
+- [x] 45. **Surface processor-stage failures as user-visible task errors:**
+  Replace silent `None` fallthroughs in the download pipeline with explicit processing errors so the progress stream can explain whether direct download, assembly, chapter splitting, or final library move failed.
+- [x] 46. **Surface scraper-stage failures as user-visible task errors:**
+  Stop swallowing scraper exceptions silently when HTML or Playwright parsing fails, and raise explicit scraper errors so `/api/info` and background downloads can report which scraping stage broke.
+- [x] 47. **Add a baseline pytest suite and isolate test discovery:**
+  Introduce `pytest`, restrict discovery to a dedicated `tests/` directory, and add initial unit coverage for bookmark aliases, Drive folder-link parsing, ZIP safety, and progress-store helpers.
+- [x] 48. **Add a minimal GitHub Actions CI pipeline:**
+  Run the new `pytest` suite on Linux and the existing PowerShell smoke test on Windows, including Playwright Chromium and FFmpeg setup so push/PR regressions are caught automatically.
+- [x] 49. **Start structural cleanup of `main.py` and `processor.py`:**
+  Extract request models and download orchestration out of `main.py`, and move reusable FFmpeg/file-artifact helpers out of `processor.py` so the remaining files trend back toward routing and pipeline orchestration instead of mixed responsibilities.
+- [x] 50. **Split `main.py` into APIRouter modules by domain:**
+  Move `settings`, `progress`, `bookmarks`, `library`, `google-drive`, and `download` routes out of the app shell so `main.py` mostly owns startup, mounting, and router registration.
+- [x] 51. **Split `processor.py` into source-download and artifact-build stages:**
+  Extract direct-download / yt-dlp source acquisition and M4B / ZIP / cover artifact building into dedicated modules so `processor.py` becomes the pipeline orchestrator instead of a mixed utility file.
+- [x] 52. **Introduce typed response models for stable API surfaces:**
+  Add Pydantic response models for the simpler settings, progress, bookmarks, download, and Google Drive status/import endpoints so route contracts become explicit before moving on to wider metadata/library typing.
+- [x] 53. **Extend pytest coverage to the new router and workflow slices:**
+  Add focused tests for `download_workflow` cache behavior, route helpers, and the split `download` router so the recent structural cleanup is backed by fast feedback instead of only manual smoke checks.
+- [x] 54. **Cover the remaining split route modules with focused tests:**
+  Add fast tests for `settings`, `progress`, `library`, and `google-drive` route modules so the new APIRouter structure is validated without depending only on end-to-end smoke runs.
+- [x] 55. **Type the shared library list payloads for Local and Drive:**
+  Add explicit response models for the common library item shape returned by `/api/library` and `/api/google-drive/library` so the broadest list payloads stop being undocumented dicts.
+- [x] 56. **Type the playback metadata payloads for Local and Drive:**
+  Add explicit response models for `/api/metadata/{file_name}` and `/api/google-drive/metadata/{file_id}` while allowing sidecar-specific extra fields, so the player-facing metadata contract is explicit without breaking flexible `.json` metadata.
+- [x] 57. **Type the internal progress and bookmark service payloads:**
+  Introduce dedicated service models for persisted progress and bookmark records so backend normalization and persistence stop relying on loose dict updates, and cover the normalization rules with focused tests.
+- [x] 58. **Type the internal library record and index payloads:**
+  Add dedicated service models for cached library records and index entries so `library_index.json` loading/saving and scan reuse stop depending on unvalidated nested dicts, and cover the normalization logic with focused tests.
+- [x] 59. **Repair `.gitignore` and protect local runtime JSON files from accidental commits:**
+  Replace the corrupted `.gitignore` file, restore proper ignore rules for `settings.json`, `bookmarks.json`, `library_index.json`, runtime logs, and local FFmpeg binaries, and confirm those files stop appearing as untracked runtime artefacts.
+- [x] 60. **Add a shared locked JSON storage layer for read-modify-write stores:**
+  Introduce a common per-file lock helper and move `settings`, `bookmarks`, and `library_index` operations onto locked read/modify/write flows so concurrent requests stop racing on the same JSON files.
+- [x] 61. **Align the progress API contract on `updated_at`:**
+  Stop exposing internal `timestamp` storage details by normalizing progress payloads onto `updated_at`, while still accepting legacy persisted entries during load.
+- [x] 62. **Reduce write pressure from frequent progress updates:**
+  Debounce non-terminal `progress_store.json` writes so frequent download ticks stop flushing the full file on every update, while still forcing persistence on task creation, completion, failure, interruption, and cleanup paths.
