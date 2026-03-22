@@ -5,8 +5,6 @@ import re
 import time
 
 import config
-from json_storage import locked_json_path, read_json_unlocked, write_json_unlocked
-from service_models import BookmarkRecordModel
 
 
 BOOKMARKS_FILE = os.path.join(config.BASE_DIR, "bookmarks.json")
@@ -91,39 +89,22 @@ def build_book_id_aliases(name: str = "", size_bytes: int | None = None, metadat
 
 
 def load_bookmarks() -> dict:
-    with locked_json_path(BOOKMARKS_FILE):
-        return _load_bookmarks_unlocked()
-
-
-def _load_bookmarks_unlocked() -> dict:
     if not os.path.exists(BOOKMARKS_FILE):
         return {}
     try:
-        data = read_json_unlocked(BOOKMARKS_FILE, default={})
-        if not isinstance(data, dict):
-            return {}
-        normalized = {}
-        for book_id, payload in data.items():
-            if not isinstance(payload, dict):
-                continue
-            try:
-                normalized[book_id] = BookmarkRecordModel.model_validate(payload).model_dump()
-            except Exception:
-                continue
-        return normalized
+        with open(BOOKMARKS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 
 def save_bookmarks(bookmarks: dict) -> bool:
-    with locked_json_path(BOOKMARKS_FILE):
-        return _save_bookmarks_unlocked(bookmarks)
-
-
-def _save_bookmarks_unlocked(bookmarks: dict) -> bool:
     temp_path = BOOKMARKS_FILE + ".tmp"
     try:
-        write_json_unlocked(BOOKMARKS_FILE, bookmarks)
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(bookmarks, f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, BOOKMARKS_FILE)
         return True
     except Exception:
         if os.path.exists(temp_path):
@@ -150,38 +131,47 @@ def list_bookmarks() -> dict:
 def save_bookmark(book_id: str, payload: dict) -> dict:
     if not book_id:
         raise RuntimeError("Missing book ID.")
-    with locked_json_path(BOOKMARKS_FILE):
-        bookmarks = _load_bookmarks_unlocked()
-        aliases = build_book_id_aliases(book_id=book_id)
-        if book_id not in bookmarks:
-            for alias in aliases:
-                if alias != book_id and isinstance(bookmarks.get(alias), dict):
-                    bookmarks[book_id] = bookmarks[alias]
-                    del bookmarks[alias]
-                    break
-        bookmarks[book_id] = BookmarkRecordModel(
-            time=payload.get("time"),
-            duration=payload.get("duration"),
-            track=payload.get("track"),
-            file_name=payload.get("file_name", ""),
-            source=payload.get("source", ""),
-            updated_at=time.time(),
-        ).model_dump()
-        if not _save_bookmarks_unlocked(bookmarks):
-            raise RuntimeError("Failed to persist bookmark.")
-        return copy.deepcopy(bookmarks[book_id])
+
+    time_value = float(payload.get("time") or 0)
+    duration_value = float(payload.get("duration") or 0)
+    track_value = int(payload.get("track") or 0)
+    if duration_value < 0:
+        duration_value = 0
+    if time_value < 0:
+        time_value = 0
+    if duration_value > 0:
+        time_value = min(time_value, duration_value)
+
+    bookmarks = load_bookmarks()
+    aliases = build_book_id_aliases(book_id=book_id)
+    if book_id not in bookmarks:
+        for alias in aliases:
+            if alias != book_id and isinstance(bookmarks.get(alias), dict):
+                bookmarks[book_id] = bookmarks[alias]
+                del bookmarks[alias]
+                break
+    bookmarks[book_id] = {
+        "time": round(time_value, 3),
+        "duration": round(duration_value, 3),
+        "track": max(0, track_value),
+        "file_name": payload.get("file_name", ""),
+        "source": payload.get("source", ""),
+        "updated_at": time.time(),
+    }
+    if not save_bookmarks(bookmarks):
+        raise RuntimeError("Failed to persist bookmark.")
+    return copy.deepcopy(bookmarks[book_id])
 
 
 def delete_bookmark(book_id: str) -> bool:
     if not book_id:
         return False
-    with locked_json_path(BOOKMARKS_FILE):
-        bookmarks = _load_bookmarks_unlocked()
-        changed = False
-        for candidate_id in build_book_id_aliases(book_id=book_id):
-            if candidate_id in bookmarks:
-                del bookmarks[candidate_id]
-                changed = True
-        if not changed:
-            return True
-        return _save_bookmarks_unlocked(bookmarks)
+    bookmarks = load_bookmarks()
+    changed = False
+    for candidate_id in build_book_id_aliases(book_id=book_id):
+        if candidate_id in bookmarks:
+            del bookmarks[candidate_id]
+            changed = True
+    if not changed:
+        return True
+    return save_bookmarks(bookmarks)

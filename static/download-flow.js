@@ -35,7 +35,7 @@ function setProgressPhase(phase, percent = 0, current = 0, total = 0) {
 let activeProgressEventSource = null;
 
 function hasActiveDownloadTask() {
-    return !!appState.activeDownloadTask && !['success', 'error', 'not_found', 'interrupted'].includes(appState.activeDownloadTask.status);
+    return !!appState.activeDownloadTask && !['success', 'error', 'not_found'].includes(appState.activeDownloadTask.status);
 }
 
 function syncDownloadProgressVisibility() {
@@ -282,12 +282,12 @@ function poll(id) {
             } else {
                 finishIntoCurrentPlayerSession(data.file_name);
             }
-        } else if (data.status === 'error' || data.status === 'not_found' || data.status === 'interrupted') {
+        } else if (data.status === 'error' || data.status === 'not_found') {
             eventSource.close();
             activeProgressEventSource = null;
             clearActiveDownloadTask();
             appState.mainButtonLabelOverride = t.btnRetry;
-            setStatusMessage(data.message || 'Error occurred', 'error');
+            setStatusMessage('Error occurred', 'error');
             document.getElementById('mainBtn').disabled = false;
             updateUI();
         }
