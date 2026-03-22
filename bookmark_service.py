@@ -7,9 +7,12 @@ import time
 import config
 
 
-BOOKMARKS_FILE = os.path.join(config.BASE_DIR, "bookmarks.json")
 BOOK_PREFIX = "book:"
 BOOK_FILE_PREFIX = "book:file:"
+STATE_DIR_NAME = ".sonicbook-state"
+STATE_FILE_NAME = "playback_state.json"
+STATE_VERSION = 1
+LEGACY_BOOKMARKS_FILE = os.path.join(config.BASE_DIR, "bookmarks.json")
 
 
 def _normalize_book_name(name: str) -> str:
@@ -46,9 +49,7 @@ def build_book_id(name: str = "", size_bytes: int | None = None, metadata: dict 
 
 
 def _derive_aliases_from_book_id(book_id: str) -> list[str]:
-    if not book_id:
-        return []
-    if not book_id.startswith(BOOK_FILE_PREFIX):
+    if not book_id or not book_id.startswith(BOOK_FILE_PREFIX):
         return []
 
     suffix = book_id[len(BOOK_FILE_PREFIX):]
@@ -88,23 +89,91 @@ def build_book_id_aliases(name: str = "", size_bytes: int | None = None, metadat
     return deduped
 
 
-def load_bookmarks() -> dict:
-    if not os.path.exists(BOOKMARKS_FILE):
-        return {}
+def _shared_state_dir() -> str:
+    return os.path.join(config.DOWNLOADS_DIR, STATE_DIR_NAME)
+
+
+def _shared_state_file() -> str:
+    return os.path.join(_shared_state_dir(), STATE_FILE_NAME)
+
+
+def _default_state() -> dict:
+    return {
+        "version": STATE_VERSION,
+        "updated_at": 0,
+        "bookmarks": {},
+        "last_active": {},
+    }
+
+
+def _ensure_shared_state_dir() -> str:
+    state_dir = _shared_state_dir()
+    os.makedirs(state_dir, exist_ok=True)
+    return state_dir
+
+
+def _load_json_file(path: str):
+    if not os.path.exists(path):
+        return None
     try:
-        with open(BOOKMARKS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception:
+        return None
+
+
+def _normalize_last_active(payload: dict | None) -> dict:
+    if not isinstance(payload, dict):
         return {}
 
+    source = str(payload.get("source") or "").strip()
+    normalized = {
+        "book_id": str(payload.get("book_id") or "").strip(),
+        "file_name": str(payload.get("file_name") or "").strip(),
+        "source": source,
+        "drive_file_id": str(payload.get("drive_file_id") or "").strip(),
+        "drive_metadata_file_id": str(payload.get("drive_metadata_file_id") or "").strip(),
+        "drive_cover_file_id": str(payload.get("drive_cover_file_id") or "").strip(),
+        "size_bytes": int(payload.get("size_bytes") or 0),
+        "updated_at": float(payload.get("updated_at") or 0),
+    }
+    if not normalized["book_id"] and not normalized["file_name"] and not normalized["drive_file_id"]:
+        return {}
+    return normalized
 
-def save_bookmarks(bookmarks: dict) -> bool:
-    temp_path = BOOKMARKS_FILE + ".tmp"
+
+def _normalize_state_payload(payload) -> dict:
+    state = _default_state()
+    if not isinstance(payload, dict):
+        return state
+
+    # Legacy flat payload: {book_id: {...bookmark...}}
+    if "bookmarks" not in payload and all(isinstance(value, dict) for value in payload.values()):
+        state["bookmarks"] = payload
+        return state
+
+    bookmarks = payload.get("bookmarks")
+    if isinstance(bookmarks, dict):
+        state["bookmarks"] = bookmarks
+    state["updated_at"] = float(payload.get("updated_at") or 0)
+    state["last_active"] = _normalize_last_active(payload.get("last_active"))
+    return state
+
+
+def _save_state(state: dict) -> bool:
+    state_path = _shared_state_file()
+    temp_path = state_path + ".tmp"
+    payload = {
+        "version": STATE_VERSION,
+        "updated_at": time.time(),
+        "bookmarks": state.get("bookmarks", {}),
+        "last_active": _normalize_last_active(state.get("last_active")),
+    }
     try:
+        _ensure_shared_state_dir()
         with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(bookmarks, f, ensure_ascii=False, indent=2)
-        os.replace(temp_path, BOOKMARKS_FILE)
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, state_path)
         return True
     except Exception:
         if os.path.exists(temp_path):
@@ -113,6 +182,38 @@ def save_bookmarks(bookmarks: dict) -> bool:
             except OSError:
                 pass
         return False
+
+
+def _migrate_legacy_bookmarks_if_needed() -> dict | None:
+    state_path = _shared_state_file()
+    if os.path.exists(state_path):
+        return None
+
+    legacy_payload = _load_json_file(LEGACY_BOOKMARKS_FILE)
+    if not isinstance(legacy_payload, dict):
+        return None
+
+    migrated_state = _default_state()
+    migrated_state["bookmarks"] = legacy_payload
+    _save_state(migrated_state)
+    return migrated_state
+
+
+def load_state() -> dict:
+    migrated_state = _migrate_legacy_bookmarks_if_needed()
+    if migrated_state is not None:
+        return _normalize_state_payload(migrated_state)
+    return _normalize_state_payload(_load_json_file(_shared_state_file()))
+
+
+def load_bookmarks() -> dict:
+    return load_state().get("bookmarks", {})
+
+
+def save_bookmarks(bookmarks: dict) -> bool:
+    state = load_state()
+    state["bookmarks"] = bookmarks if isinstance(bookmarks, dict) else {}
+    return _save_state(state)
 
 
 def get_bookmark(book_id: str) -> dict | None:
@@ -128,6 +229,31 @@ def list_bookmarks() -> dict:
     return load_bookmarks()
 
 
+def get_last_active() -> dict:
+    return copy.deepcopy(load_state().get("last_active") or {})
+
+
+def save_last_active(payload: dict) -> dict:
+    normalized = _normalize_last_active(payload)
+    if not normalized:
+        raise RuntimeError("Missing active playback payload.")
+
+    if not normalized["updated_at"]:
+        normalized["updated_at"] = time.time()
+
+    state = load_state()
+    state["last_active"] = normalized
+    if not _save_state(state):
+        raise RuntimeError("Failed to persist last active playback.")
+    return copy.deepcopy(normalized)
+
+
+def clear_last_active() -> bool:
+    state = load_state()
+    state["last_active"] = {}
+    return _save_state(state)
+
+
 def save_bookmark(book_id: str, payload: dict) -> dict:
     if not book_id:
         raise RuntimeError("Missing book ID.")
@@ -135,12 +261,27 @@ def save_bookmark(book_id: str, payload: dict) -> dict:
     time_value = float(payload.get("time") or 0)
     duration_value = float(payload.get("duration") or 0)
     track_value = int(payload.get("track") or 0)
+    completed_value = payload.get("completed")
     if duration_value < 0:
         duration_value = 0
     if time_value < 0:
         time_value = 0
     if duration_value > 0:
         time_value = min(time_value, duration_value)
+
+    if isinstance(completed_value, str):
+        lowered = completed_value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            completed_value = True
+        elif lowered in {"0", "false", "no", "off"}:
+            completed_value = False
+        else:
+            completed_value = None
+    elif completed_value is not None:
+        completed_value = bool(completed_value)
+
+    derived_completed = duration_value > 0 and (time_value / duration_value) >= 0.995
+    completed_flag = completed_value if isinstance(completed_value, bool) else derived_completed
 
     bookmarks = load_bookmarks()
     aliases = build_book_id_aliases(book_id=book_id)
@@ -150,28 +291,46 @@ def save_bookmark(book_id: str, payload: dict) -> dict:
                 bookmarks[book_id] = bookmarks[alias]
                 del bookmarks[alias]
                 break
-    bookmarks[book_id] = {
+
+    bookmark = {
         "time": round(time_value, 3),
         "duration": round(duration_value, 3),
         "track": max(0, track_value),
         "file_name": payload.get("file_name", ""),
         "source": payload.get("source", ""),
+        "completed": completed_flag,
         "updated_at": time.time(),
     }
-    if not save_bookmarks(bookmarks):
+    bookmarks[book_id] = bookmark
+
+    state = load_state()
+    state["bookmarks"] = bookmarks
+    if not _save_state(state):
         raise RuntimeError("Failed to persist bookmark.")
-    return copy.deepcopy(bookmarks[book_id])
+    return copy.deepcopy(bookmark)
 
 
 def delete_bookmark(book_id: str) -> bool:
     if not book_id:
         return False
-    bookmarks = load_bookmarks()
+
+    state = load_state()
+    bookmarks = state.get("bookmarks", {})
     changed = False
     for candidate_id in build_book_id_aliases(book_id=book_id):
         if candidate_id in bookmarks:
             del bookmarks[candidate_id]
             changed = True
+
+    last_active = state.get("last_active") or {}
+    if last_active:
+        active_book_id = str(last_active.get("book_id") or "").strip()
+        if active_book_id and active_book_id in build_book_id_aliases(book_id=book_id):
+            state["last_active"] = {}
+            changed = True
+
     if not changed:
         return True
-    return save_bookmarks(bookmarks)
+
+    state["bookmarks"] = bookmarks
+    return _save_state(state)

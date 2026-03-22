@@ -99,15 +99,23 @@ function getLegacyBookmark(legacyKey) {
 function applyBookmarkToLibraryItem(file, bookmark, fallbackDuration = 0) {
     file.fillPct = 0;
     file.isCompleted = false;
-    if (!bookmark || !bookmark.time || !bookmark.duration) {
+    if (!bookmark) {
         return;
     }
-    if (!file.durationSeconds && (bookmark.duration || fallbackDuration)) {
-        file.durationSeconds = bookmark.duration || fallbackDuration;
+    const bookmarkDuration = Number(bookmark.duration) || 0;
+    const bookmarkTime = Number(bookmark.time) || 0;
+    if (!file.durationSeconds && (bookmarkDuration || fallbackDuration)) {
+        file.durationSeconds = bookmarkDuration || fallbackDuration;
     }
-    file.fillPct = (bookmark.time / bookmark.duration) * 100;
-    if (file.fillPct >= 99.5) {
+    if (bookmarkDuration > 0 && bookmarkTime > 0) {
+        file.fillPct = (bookmarkTime / bookmarkDuration) * 100;
+    }
+    if (typeof bookmark.completed === 'boolean') {
+        file.isCompleted = bookmark.completed;
+    } else if (file.fillPct >= 99.5) {
         file.isCompleted = true;
+    }
+    if (file.isCompleted) {
         file.fillPct = 100;
     }
 }
@@ -132,6 +140,10 @@ function handleLibraryAction(action, fileName, event) {
     }
     if (action === 'reset') {
         resetBookProgress(event, fileName);
+        return;
+    }
+    if (action === 'complete') {
+        void toggleBookCompleted(event, fileName);
         return;
     }
     if (action === 'chapters') {
@@ -176,8 +188,9 @@ function renderLibraryItem(file, t) {
     const safeName = escapeHtml(file.name);
     const playId = buildLibraryPlayButtonId('local', file.name);
     const durationLabel = formatDurationLabel(file.durationSeconds);
+    const completedTooltip = file.isCompleted ? t.markUncompletedTooltip : t.markCompletedTooltip;
     return `
-        <div class="library-item ${isActive} ${completedClass}" data-file="${safeName}" data-book-id="${escapeHtml(file.book_id || '')}">
+        <div class="library-item ${isActive} ${completedClass}" data-file="${safeName}" data-source="local" data-book-id="${escapeHtml(file.book_id || '')}" data-duration-seconds="${Number(file.durationSeconds) || 0}">
             <div class="library-bg-fill" style="width: ${file.fillPct}%;"></div>
             <div class="library-item-info">
                 <div class="library-item-title">${escapeHtml(file.name)}</div>
@@ -195,6 +208,12 @@ function renderLibraryItem(file, t) {
                         data-library-action="play"
                         data-file="${safeName}"
                         title="Play / Pause">▶</button>
+                <button class="library-quick-btn library-quick-complete ${file.isCompleted ? 'is-completed' : ''}"
+                        type="button"
+                        data-library-action="complete"
+                        data-file="${safeName}"
+                        aria-pressed="${file.isCompleted ? 'true' : 'false'}"
+                        title="${escapeHtml(completedTooltip)}">&#10003;</button>
                 <button class="library-quick-btn"
                         type="button"
                         data-library-action="reset"
@@ -221,12 +240,15 @@ function renderDriveLibraryItem(file, t) {
         : isImported
             ? (t.googleDriveImportedShort || t.googleDriveImport)
             : t.googleDriveImport;
+    const completedTooltip = file.isCompleted ? t.markUncompletedTooltip : t.markCompletedTooltip;
     return `
         <div class="library-item drive-library-item ${isActive} ${completedClass} ${isImporting ? 'is-importing' : ''} ${isImported ? 'is-imported' : ''}"
              data-file="${safeName}"
              data-source="google_drive"
              data-drive-file-id="${escapeHtml(file.drive_file_id || '')}"
              data-book-id="${escapeHtml(file.book_id || '')}"
+             data-duration-seconds="${Number(file.durationSeconds) || 0}"
+             data-size-bytes="${Number(file.size_bytes) || 0}"
              data-metadata-file-id="${escapeHtml(file.drive_metadata_file_id || '')}"
              data-cover-file-id="${escapeHtml(file.drive_cover_file_id || '')}">
             <div class="library-bg-fill" style="width: ${file.fillPct || 0}%;"></div>
@@ -245,6 +267,12 @@ function renderDriveLibraryItem(file, t) {
                         data-library-action="play"
                         data-file="${safeName}"
                         title="${escapeHtml(t.googleDriveStreamTooltip || t.googleDriveStream)}">${escapeHtml(t.googleDriveStream)}</button>` : ''}
+                <button class="library-quick-btn library-quick-complete ${file.isCompleted ? 'is-completed' : ''}"
+                        type="button"
+                        data-library-action="complete"
+                        data-file="${safeName}"
+                        aria-pressed="${file.isCompleted ? 'true' : 'false'}"
+                        title="${escapeHtml(completedTooltip)}">&#10003;</button>
                 <button class="library-quick-btn"
                         type="button"
                         data-library-action="reset"
@@ -313,15 +341,25 @@ async function loadLibrary() {
             applyBookmarkToLibraryItem(f, saved, f.durationSeconds || 0);
         });
         const sortByRecent = (a, b) => b.mtime - a.mtime;
+        const isActiveBook = (file) => (
+            playerState.fileName === file.name ||
+            matchesLastActivePlayback({
+                source: 'local',
+                bookId: file.book_id,
+                fileName: file.name
+            })
+        );
         const nowListening = data.files
-            .filter(f => !f.isCompleted && (playerState.fileName === f.name || f.fillPct > 0))
+            .filter(f => !f.isCompleted && (isActiveBook(f) || f.fillPct > 0))
             .sort((a, b) => {
-                if (playerState.fileName === a.name) return -1;
-                if (playerState.fileName === b.name) return 1;
+                const aIsActive = isActiveBook(a);
+                const bIsActive = isActiveBook(b);
+                if (aIsActive && !bIsActive) return -1;
+                if (!aIsActive && bIsActive) return 1;
                 return sortByRecent(a, b);
             });
         const inQueue = data.files
-            .filter(f => !f.isCompleted && f.fillPct === 0 && playerState.fileName !== f.name)
+            .filter(f => !f.isCompleted && f.fillPct === 0 && !isActiveBook(f))
             .sort(sortByRecent);
         const completed = data.files
             .filter(f => f.isCompleted)
@@ -374,20 +412,26 @@ async function loadGoogleDriveLibrary(forceRefresh = false) {
             applyBookmarkToLibraryItem(f, saved, f.durationSeconds || 0);
         });
         const sortByRecent = (a, b) => (b.mtime || 0) - (a.mtime || 0);
+        const isActiveDriveBook = (file) => (
+            (playerState.source === 'google_drive' && playerState.streamUrl?.includes(`/${file.drive_file_id}/stream`)) ||
+            matchesLastActivePlayback({
+                source: 'google_drive',
+                bookId: file.book_id,
+                fileName: file.name,
+                driveFileId: file.drive_file_id
+            })
+        );
         const nowListening = data.files
-            .filter(f => !f.isCompleted && (
-                (playerState.source === 'google_drive' && playerState.streamUrl?.includes(`/${f.drive_file_id}/stream`)) ||
-                f.fillPct > 0
-            ))
+            .filter(f => !f.isCompleted && (isActiveDriveBook(f) || f.fillPct > 0))
             .sort((a, b) => {
-                const aIsCurrent = playerState.source === 'google_drive' && playerState.streamUrl?.includes(`/${a.drive_file_id}/stream`);
-                const bIsCurrent = playerState.source === 'google_drive' && playerState.streamUrl?.includes(`/${b.drive_file_id}/stream`);
-                if (aIsCurrent) return -1;
-                if (bIsCurrent) return 1;
+                const aIsCurrent = isActiveDriveBook(a);
+                const bIsCurrent = isActiveDriveBook(b);
+                if (aIsCurrent && !bIsCurrent) return -1;
+                if (!aIsCurrent && bIsCurrent) return 1;
                 return sortByRecent(a, b);
             });
         const inQueue = data.files
-            .filter(f => !f.isCompleted && f.fillPct === 0 && !(playerState.source === 'google_drive' && playerState.streamUrl?.includes(`/${f.drive_file_id}/stream`)))
+            .filter(f => !f.isCompleted && f.fillPct === 0 && !isActiveDriveBook(f))
             .sort(sortByRecent);
         const completed = data.files
             .filter(f => f.isCompleted)
@@ -466,6 +510,7 @@ function buildDriveItemFromRow(row) {
         drive_file_id: row.dataset.driveFileId || '',
         drive_metadata_file_id: row.dataset.metadataFileId || '',
         drive_cover_file_id: row.dataset.coverFileId || '',
+        size_bytes: Number(row.dataset.sizeBytes) || 0,
         source: 'google_drive',
         streamable: true
     };
@@ -505,6 +550,92 @@ function playDriveLibraryItem(row, autoPlay = true) {
     appState.step = 'done';
     appState.mainButtonLabelOverride = '';
     initDrivePlayer(item, autoPlay, true);
+}
+
+function cacheLibraryBookmarkAliases(bookId, fileName, bookmark, sizeBytes = 0) {
+    const aliases = [bookId, buildClientBookId(fileName, sizeBytes), buildClientBookId(fileName), buildLegacyClientBookId(fileName)];
+    aliases.forEach((alias) => {
+        if (alias) {
+            appState.bookmarks[alias] = bookmark;
+        }
+    });
+}
+
+function isRowCurrentBook(row, fileName, bookId) {
+    if (!row) {
+        return false;
+    }
+    if (bookId && playerState.bookId === bookId) {
+        return true;
+    }
+    if ((row.dataset.source || 'local') === 'google_drive') {
+        return playerState.source === 'google_drive' && playerState.driveFileId === (row.dataset.driveFileId || '');
+    }
+    return playerState.source !== 'google_drive' && playerState.fileName === fileName;
+}
+
+async function toggleBookCompleted(event, fileName) {
+    event.stopPropagation();
+    const row = event.target.closest('.library-item');
+    if (!row) {
+        return;
+    }
+
+    const t = i18n[appState.currentLang];
+    const source = row.dataset.source || 'local';
+    const sizeBytes = Number(row.dataset.sizeBytes) || 0;
+    const bookId = row.dataset.bookId || buildClientBookId(fileName, sizeBytes) || buildClientBookId(fileName);
+    if (!bookId) {
+        setStatusMessage(t.libLoadError, 'error');
+        return;
+    }
+
+    const existingBookmark = getCachedBookmark(bookId)
+        || getCachedBookmark(buildClientBookId(fileName, sizeBytes))
+        || getCachedBookmark(buildClientBookId(fileName))
+        || getCachedBookmark(buildLegacyClientBookId(fileName))
+        || null;
+    const isCompleted = !!(existingBookmark && existingBookmark.completed === true);
+    const knownDuration = Number(row.dataset.durationSeconds) || Number(existingBookmark?.duration) || 0;
+    const safeDuration = knownDuration > 0 ? knownDuration : 1;
+    const nextCompleted = !isCompleted;
+    const nextTime = nextCompleted
+        ? safeDuration
+        : (knownDuration > 0 ? Math.max(0, knownDuration * 0.98) : 0);
+
+    try {
+        const res = await fetch(`/api/bookmarks/${encodeURIComponent(bookId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                time: nextTime,
+                duration: safeDuration,
+                track: 0,
+                file_name: fileName,
+                source,
+                completed: nextCompleted
+            })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.bookmark) {
+            throw new Error(data.detail || 'bookmark-update');
+        }
+
+        cacheLibraryBookmarkAliases(bookId, fileName, data.bookmark, sizeBytes);
+
+        if (isRowCurrentBook(row, fileName, bookId) && playerState.duration > 0) {
+            audio.currentTime = nextCompleted ? playerState.duration : Math.max(0, playerState.duration * 0.98);
+            if (nextCompleted) {
+                audio.pause();
+            }
+            scheduleBookmarkSync(true);
+        }
+
+        clearStatusMessage();
+        await loadLibrary();
+    } catch (e) {
+        setStatusMessage(String(e.message || e), 'error');
+    }
 }
 
 async function resetBookProgress(event, fileName) {

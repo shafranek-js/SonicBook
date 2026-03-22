@@ -15,6 +15,9 @@ const i18n = {
         libLoadErrorHint: "Check the folder path or reload the app to try again.",
         libraryLoadingTitle: "Loading library",
         libraryLoadingHint: "Preparing your local collection and reading saved progress.",
+        librarySyncReady: "Shared sync",
+        librarySyncLoading: "Syncing...",
+        librarySyncUnavailable: "Sync unavailable",
         chaptersLoadingTitle: "Loading chapters",
         chaptersLoadingHint: "Preparing timeline and chapter navigation for the selected book.",
         noChaptersHint: "This file can still be played, but no structured chapter list is available.",
@@ -63,7 +66,9 @@ const i18n = {
         chaptersTooltip: "Show or hide chapter list",
         chapterCountShort: "ch",
         resetTooltip: "Reset playback progress",
-        confirmReset: "Are you sure you want to reset progress for this book?"
+        confirmReset: "Are you sure you want to reset progress for this book?",
+        markCompletedTooltip: "Mark as completed",
+        markUncompletedTooltip: "Mark as not completed"
     },
     ru: {
         placeholder: "Вставьте ссылку...",
@@ -81,6 +86,9 @@ const i18n = {
         libLoadErrorHint: "Проверьте путь к папке или обновите приложение и попробуйте снова.",
         libraryLoadingTitle: "Загрузка библиотеки",
         libraryLoadingHint: "Подготавливаю локальную коллекцию и сохраненный прогресс.",
+        librarySyncReady: "Общее состояние",
+        librarySyncLoading: "Синхронизация...",
+        librarySyncUnavailable: "Синхронизации нет",
         chaptersLoadingTitle: "Загрузка глав",
         chaptersLoadingHint: "Подготавливаю таймлайн и навигацию по главам для выбранной книги.",
         noChaptersHint: "Файл все равно можно слушать, но структурированный список глав недоступен.",
@@ -129,7 +137,9 @@ const i18n = {
         chaptersTooltip: "Показать или скрыть список глав",
         chapterCountShort: "гл.",
         resetTooltip: "Сбросить прогресс прослушивания",
-        confirmReset: "Вы уверены, что хотите сбросить прогресс для этой книги?"
+        confirmReset: "Вы уверены, что хотите сбросить прогресс для этой книги?",
+        markCompletedTooltip: "Отметить как прослушанную",
+        markUncompletedTooltip: "Снять отметку о завершении"
     }
 };
 
@@ -160,7 +170,9 @@ const appState = {
         refreshingLibrary: false
     },
     driveStreamBufferingFileId: '',
-    bookmarks: {}
+    bookmarks: {},
+    lastActivePlayback: null,
+    sharedStateStatus: 'syncing'
 };
 let playerLayoutFrame = null;
 let mainDragDepth = 0;
@@ -213,6 +225,7 @@ function buildLibraryPlayButtonId(source, identifier) {
 }
 
 async function loadBookmarkSummary() {
+    appState.sharedStateStatus = 'syncing';
     try {
         const res = await fetch('/api/bookmarks');
         const data = await res.json();
@@ -220,10 +233,126 @@ async function loadBookmarkSummary() {
             throw new Error(data.detail || 'bookmarks');
         }
         appState.bookmarks = data.bookmarks || {};
+        appState.lastActivePlayback = normalizeLastActivePlayback(data.last_active);
+        appState.sharedStateStatus = 'ready';
     } catch (e) {
         appState.bookmarks = {};
+        appState.lastActivePlayback = null;
+        appState.sharedStateStatus = 'error';
     }
+    syncSharedStateIndicator();
     return appState.bookmarks;
+}
+
+function normalizeLastActivePlayback(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+    const normalized = {
+        book_id: String(payload.book_id || '').trim(),
+        file_name: String(payload.file_name || '').trim(),
+        source: String(payload.source || '').trim(),
+        drive_file_id: String(payload.drive_file_id || '').trim(),
+        drive_metadata_file_id: String(payload.drive_metadata_file_id || '').trim(),
+        drive_cover_file_id: String(payload.drive_cover_file_id || '').trim(),
+        size_bytes: Number(payload.size_bytes) || 0,
+        updated_at: Number(payload.updated_at) || 0
+    };
+    if (!normalized.book_id && !normalized.file_name && !normalized.drive_file_id) {
+        return null;
+    }
+    return normalized;
+}
+
+function setLastActivePlayback(payload) {
+    appState.lastActivePlayback = normalizeLastActivePlayback(payload);
+    return appState.lastActivePlayback;
+}
+
+function matchesLastActivePlayback({ source = '', bookId = '', fileName = '', driveFileId = '' } = {}) {
+    const lastActive = appState.lastActivePlayback;
+    if (!lastActive) {
+        return false;
+    }
+    if (source && lastActive.source && source !== lastActive.source) {
+        return false;
+    }
+    if (driveFileId && lastActive.drive_file_id) {
+        return driveFileId === lastActive.drive_file_id;
+    }
+    if (bookId && lastActive.book_id) {
+        return bookId === lastActive.book_id;
+    }
+    if (fileName && lastActive.file_name) {
+        return fileName === lastActive.file_name;
+    }
+    return false;
+}
+
+async function syncLastActivePlayback(payload) {
+    const normalized = normalizeLastActivePlayback(payload);
+    if (!normalized) {
+        return null;
+    }
+    setLastActivePlayback(normalized);
+    try {
+        const res = await fetch('/api/playback/active', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(normalized)
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'playback-active');
+        }
+        return setLastActivePlayback(data.last_active || normalized);
+    } catch (e) {
+        console.warn('Failed to sync active playback', e);
+        return normalized;
+    }
+}
+
+function buildDriveRestoreItem(lastActive) {
+    const normalized = normalizeLastActivePlayback(lastActive);
+    if (!normalized || !normalized.drive_file_id) {
+        return null;
+    }
+    return {
+        name: normalized.file_name || '',
+        book_id: normalized.book_id || '',
+        drive_file_id: normalized.drive_file_id,
+        drive_metadata_file_id: normalized.drive_metadata_file_id || '',
+        drive_cover_file_id: normalized.drive_cover_file_id || '',
+        size_bytes: normalized.size_bytes || 0,
+        source: 'google_drive',
+        streamable: true
+    };
+}
+
+async function restoreSharedPlaybackState() {
+    await loadBookmarkSummary();
+    const sharedPlayback = appState.lastActivePlayback;
+    const localLastFile = localStorage.getItem('last-played-file');
+
+    if (sharedPlayback?.source === 'google_drive' && sharedPlayback.drive_file_id && appState.googleDrive.connected) {
+        resetForm();
+        appState.step = 'done';
+        appState.mainButtonLabelOverride = '';
+        initDrivePlayer(buildDriveRestoreItem(sharedPlayback), false, false);
+        return true;
+    }
+
+    if (sharedPlayback?.source !== 'google_drive' && sharedPlayback?.file_name) {
+        playFromLibrary(sharedPlayback.file_name, false, true, false);
+        return true;
+    }
+
+    if (localLastFile) {
+        playFromLibrary(localLastFile, false, true, false);
+        return true;
+    }
+
+    return false;
 }
 
 function getCachedBookmark(bookId) {
@@ -258,6 +387,30 @@ function renderPanelLoadingState(title, subtitle, count = 6, compact = false) {
             ${renderSkeletonRows(count, compact)}
         </div>
     `;
+}
+
+function syncSharedStateIndicator() {
+    const badge = document.getElementById('librarySyncBadge');
+    if (!badge) {
+        return;
+    }
+    const t = i18n[appState.currentLang];
+    badge.classList.remove('is-ready', 'is-syncing', 'is-error');
+    if (appState.sharedStateStatus === 'ready') {
+        badge.classList.add('is-ready');
+        badge.innerText = t.librarySyncReady;
+        badge.title = t.librarySyncReady;
+        return;
+    }
+    if (appState.sharedStateStatus === 'error') {
+        badge.classList.add('is-error');
+        badge.innerText = t.librarySyncUnavailable;
+        badge.title = t.librarySyncUnavailable;
+        return;
+    }
+    badge.classList.add('is-syncing');
+    badge.innerText = t.librarySyncLoading;
+    badge.title = t.librarySyncLoading;
 }
 
 function syncMainSurfaceState() {
@@ -539,6 +692,7 @@ function updateUI() {
     document.getElementById('settingsBtn').setAttribute('aria-label', t.settingsTooltip);
     document.getElementById('settingsLangBtn').title = t.langTooltip;
     document.getElementById('settingsLangBtn').setAttribute('aria-label', t.langTooltip);
+    syncSharedStateIndicator();
     syncGoogleDriveSettingsUI();
     syncLibrarySourceUI();
 
@@ -851,30 +1005,30 @@ async function saveGoogleDriveFolder() {
 }
 
 // Init logic
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
     setPlayButtonState(false);
     if (localStorage.getItem('theme') === 'light') {
         document.body.classList.add('light-theme');
         document.getElementById('themeBtn').innerText = '☀️';
     }
     setMode(appState.currentMode);
-    if (localStorage.getItem('library-open') === 'true') {
+    const shouldOpenLibrary = localStorage.getItem('library-open') === 'true';
+    if (shouldOpenLibrary) {
         document.getElementById('appContainer').classList.add('library-open');
-        loadLibrary();
     }
     if (localStorage.getItem('panel-open') === 'true') {
         document.getElementById('appContainer').classList.add('panel-open');
-    }
-    const lastFile = localStorage.getItem('last-played-file');
-    if (lastFile) {
-        playFromLibrary(lastFile, false, true, false);
     }
     syncResponsivePanelWidths();
     updateUI();
     initLibraryInteractions();
     initSettingsMenu();
     initDragAndDrop();
-    loadGoogleDriveStatus();
+    await loadGoogleDriveStatus();
+    await restoreSharedPlaybackState();
+    if (shouldOpenLibrary) {
+        loadLibrary();
+    }
     schedulePlayerLayoutSync();
 });
 
@@ -988,13 +1142,7 @@ function playFromLibrary(fileName, autoPlay = true, keepPanels = false, autoOpen
     localStorage.setItem('last-played-file', fileName);
     appState.step = 'done';
     appState.mainButtonLabelOverride = '';
-    initPlayer(fileName, autoOpenChapters);
-    if (autoPlay) {
-        setTimeout(() => {
-            audio.play();
-            setPlayButtonState(true);
-        }, 500);
-    }
+    initPlayer(fileName, autoOpenChapters, autoPlay);
 }
 
 function handleLibraryChaptersToggle(event, fileName) {

@@ -4,8 +4,10 @@ import asyncio
 import logging
 import json
 import html
+import mimetypes
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+from urllib.parse import quote
 import uvicorn
 import aiofiles
 import httpx
@@ -33,6 +35,77 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+STREAM_CHUNK_SIZE = 1024 * 1024
+
+MEDIA_TYPE_OVERRIDES = {
+    ".m4b": "audio/mp4",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".mp4": "audio/mp4",
+    ".zip": "application/zip",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".json": "application/json",
+}
+
+
+def guess_media_type(file_path: str) -> str:
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in MEDIA_TYPE_OVERRIDES:
+        return MEDIA_TYPE_OVERRIDES[ext]
+    guessed_type, _ = mimetypes.guess_type(file_path)
+    return guessed_type or "application/octet-stream"
+
+
+def build_inline_content_disposition(file_path: str) -> str:
+    return f"inline; filename*=utf-8''{quote(os.path.basename(file_path))}"
+
+
+def parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | None:
+    if not range_header:
+        return None
+
+    units, _, raw_range = range_header.partition("=")
+    if units.strip().lower() != "bytes" or not raw_range:
+        raise HTTPException(status_code=416, detail="Invalid range unit")
+
+    first_range = raw_range.split(",", 1)[0].strip()
+    start_str, sep, end_str = first_range.partition("-")
+    if not sep:
+        raise HTTPException(status_code=416, detail="Invalid range format")
+
+    try:
+        if start_str:
+            start = int(start_str)
+            end = int(end_str) if end_str else file_size - 1
+        else:
+            suffix_length = int(end_str)
+            if suffix_length <= 0:
+                raise HTTPException(status_code=416, detail="Invalid range suffix")
+            start = max(file_size - suffix_length, 0)
+            end = file_size - 1
+    except ValueError as exc:
+        raise HTTPException(status_code=416, detail="Invalid byte range") from exc
+
+    if start < 0 or end < start or start >= file_size:
+        raise HTTPException(status_code=416, detail="Requested range not satisfiable")
+
+    end = min(end, file_size - 1)
+    return start, end
+
+
+async def iter_file_range(file_path: str, start: int, end: int):
+    with open(file_path, "rb") as f:
+        f.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            chunk = f.read(min(STREAM_CHUNK_SIZE, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
 
 def resolve_download_path(file_name: str) -> str:
     if not file_name:
@@ -112,6 +185,17 @@ class BookmarkUpdateRequest(BaseModel):
     track: int = 0
     file_name: str = ""
     source: str = ""
+    completed: bool | None = None
+
+
+class ActivePlaybackStateRequest(BaseModel):
+    book_id: str = ""
+    file_name: str = ""
+    source: str = ""
+    drive_file_id: str = ""
+    drive_metadata_file_id: str = ""
+    drive_cover_file_id: str = ""
+    size_bytes: int = 0
 
 async def cleanup_task():
     """Background task to remove old store entries (files are kept permanently)"""
@@ -393,7 +477,10 @@ async def progress_stream(task_id: str, request: Request):
 
 @app.get("/api/bookmarks")
 async def get_bookmarks():
-    return {"bookmarks": bookmark_service.list_bookmarks()}
+    return {
+        "bookmarks": bookmark_service.list_bookmarks(),
+        "last_active": bookmark_service.get_last_active(),
+    }
 
 
 @app.get("/api/bookmarks/{book_id:path}")
@@ -416,6 +503,15 @@ async def delete_bookmark(book_id: str):
         raise HTTPException(status_code=500, detail="Failed to delete bookmark")
     return {"status": "success"}
 
+
+@app.post("/api/playback/active")
+async def save_active_playback(request: ActivePlaybackStateRequest):
+    try:
+        playback_state = bookmark_service.save_last_active(request.model_dump())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": "success", "last_active": playback_state}
+
 @app.get("/api/library")
 async def get_library():
     return {"files": library_service.list_library_files(config.DOWNLOADS_DIR)}
@@ -426,11 +522,40 @@ async def get_imported_book_ids():
     return {"book_ids": library_service.list_library_book_ids(config.DOWNLOADS_DIR)}
 
 @app.get("/api/files/{file_name:path}")
-async def download_file(file_name: str):
+async def download_file(file_name: str, request: Request):
     file_path = resolve_download_path(file_name)
     if os.path.exists(file_path):
-        # FileResponse natively supports HTTP Range requests for streaming audio
-        return FileResponse(path=file_path, filename=os.path.basename(file_path))
+        media_type = guess_media_type(file_path)
+        common_headers = {
+            "accept-ranges": "bytes",
+            "content-disposition": build_inline_content_disposition(file_path),
+        }
+        file_size = os.path.getsize(file_path)
+        range_header = request.headers.get("range", "")
+        byte_range = parse_range_header(range_header, file_size) if range_header else None
+        if byte_range is not None:
+            start, end = byte_range
+            headers = {
+                **common_headers,
+                "content-length": str(end - start + 1),
+                "content-range": f"bytes {start}-{end}/{file_size}",
+            }
+            return StreamingResponse(
+                iter_file_range(file_path, start, end),
+                status_code=206,
+                media_type=media_type,
+                headers=headers,
+            )
+
+        response = FileResponse(
+            path=file_path,
+            media_type=media_type,
+            filename=os.path.basename(file_path),
+            content_disposition_type="inline",
+        )
+        response.headers["accept-ranges"] = "bytes"
+        response.headers["content-disposition"] = common_headers["content-disposition"]
+        return response
     raise HTTPException(status_code=404, detail="File not found")
 
 @app.get("/api/metadata/{file_name}")
