@@ -2,6 +2,7 @@ import copy
 import json
 import os
 import shutil
+import uuid
 
 
 # Paths
@@ -13,6 +14,11 @@ DEBUG_LOG = os.path.join(BASE_DIR, "app_debug.log")
 DEFAULT_DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
 DEFAULT_SETTINGS = {
     "downloads_dir": DEFAULT_DOWNLOADS_DIR,
+    "instance_id": "",
+    "playback_profile": {
+        "id": "",
+        "source": "auto",
+    },
     "google_drive": {
         "folder_id": "",
         "auth": {
@@ -78,11 +84,27 @@ def load_settings():
     return settings
 
 
+def _normalize_playback_profile_id(value: str) -> str:
+    normalized = " ".join(str(value or "").strip().split()).lower()
+    return normalized[:160]
+
+
+def _ensure_instance_id_in_settings(settings: dict) -> tuple[str, bool]:
+    instance_id = str(settings.get("instance_id") or "").strip().lower()
+    if instance_id:
+        return instance_id, False
+    instance_id = uuid.uuid4().hex
+    settings["instance_id"] = instance_id
+    return instance_id, True
+
+
 def save_settings(settings):
     temp_settings_file = SETTINGS_FILE + ".tmp"
     try:
+        settings_to_save = _deep_merge(DEFAULT_SETTINGS, settings or {})
+        _ensure_instance_id_in_settings(settings_to_save)
         with open(temp_settings_file, "w", encoding="utf-8") as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
+            json.dump(settings_to_save, f, ensure_ascii=False, indent=2)
         os.replace(temp_settings_file, SETTINGS_FILE)
         return True
     except Exception:
@@ -137,6 +159,82 @@ def load_downloads_dir():
     if path and os.path.exists(path):
         return path
     return DEFAULT_DOWNLOADS_DIR
+
+
+def get_instance_id() -> str:
+    settings = load_settings()
+    instance_id, changed = _ensure_instance_id_in_settings(settings)
+    if changed:
+        save_settings(settings)
+    return instance_id
+
+
+def get_playback_profile_status() -> dict:
+    settings = load_settings()
+    playback_profile = settings.get("playback_profile", {})
+    configured_id = _normalize_playback_profile_id(playback_profile.get("id", ""))
+    configured_source = str(playback_profile.get("source") or "auto").strip().lower()
+    account_email = _normalize_playback_profile_id(
+        settings.get("google_drive", {}).get("auth", {}).get("account_email", "")
+    )
+
+    if not configured_id and account_email:
+        playback_profile["id"] = account_email
+        playback_profile["source"] = "google_account"
+        settings["playback_profile"] = _deep_merge(DEFAULT_SETTINGS["playback_profile"], playback_profile)
+        save_settings(settings)
+        configured_id = account_email
+        configured_source = "google_account"
+
+    if configured_id:
+        resolved_id = configured_id
+        source = "google_account" if configured_source == "google_account" else "manual"
+    elif account_email:
+        resolved_id = account_email
+        source = "google_account"
+    else:
+        resolved_id = f"device:{get_instance_id()}"
+        source = "device"
+
+    return {
+        "configured_id": configured_id,
+        "profile_id": resolved_id,
+        "source": source,
+        "account_email": account_email,
+    }
+
+
+def save_playback_profile_id(profile_id: str) -> dict:
+    settings = load_settings()
+    playback_profile = settings.get("playback_profile", copy.deepcopy(DEFAULT_SETTINGS["playback_profile"]))
+    normalized = _normalize_playback_profile_id(profile_id)
+    playback_profile["id"] = normalized
+    playback_profile["source"] = "manual" if normalized else "auto"
+    settings["playback_profile"] = _deep_merge(DEFAULT_SETTINGS["playback_profile"], playback_profile)
+    if not save_settings(settings):
+        raise RuntimeError("Failed to persist playback profile.")
+    return get_playback_profile_status()
+
+
+def sync_playback_profile_with_google_account(account_email: str) -> bool:
+    normalized_email = _normalize_playback_profile_id(account_email)
+    if not normalized_email:
+        return True
+
+    settings = load_settings()
+    playback_profile = settings.get("playback_profile", copy.deepcopy(DEFAULT_SETTINGS["playback_profile"]))
+    current_id = _normalize_playback_profile_id(playback_profile.get("id", ""))
+    current_source = str(playback_profile.get("source") or "auto").strip().lower()
+
+    if current_id and current_source == "manual":
+        return True
+    if current_id == normalized_email and current_source == "google_account":
+        return True
+
+    playback_profile["id"] = normalized_email
+    playback_profile["source"] = "google_account"
+    settings["playback_profile"] = _deep_merge(DEFAULT_SETTINGS["playback_profile"], playback_profile)
+    return save_settings(settings)
 
 
 DOWNLOADS_DIR = load_downloads_dir()

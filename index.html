@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SonicBook Downloader</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -67,6 +68,17 @@
                                     <span id="currentPath" class="current-path">...</span>
                                     <button onclick="chooseFolder()" id="btn-change-folder" class="folder-btn">Change</button>
                                 </div>
+                            </div>
+                            <div class="settings-row">
+                                <div class="settings-row-label" id="t-playback-profile-label">Sync profile</div>
+                                <div class="settings-drive-status-line">
+                                    <span id="playbackProfileStatusBadge" class="settings-status-badge settings-status-idle">This device only</span>
+                                </div>
+                                <input type="text" id="playbackProfileInput" placeholder="Your email or private profile name">
+                                <div class="settings-inline-actions">
+                                    <button class="settings-toggle-btn" id="playbackProfileSaveBtn" onclick="savePlaybackProfile()">Save profile</button>
+                                </div>
+                                <div class="settings-hint" id="playbackProfileHint">Use the same sync profile on your own devices to share progress. Other people should keep a different profile.</div>
                             </div>
                             <div class="settings-row">
                                 <div class="settings-row-label" id="t-google-drive-label">Google Drive</div>

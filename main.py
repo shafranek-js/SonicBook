@@ -12,7 +12,7 @@ import uvicorn
 import aiofiles
 import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -173,10 +173,20 @@ class GoogleDriveFolderRequest(BaseModel):
     folder_id: str = ""
 
 
+class PlaybackProfileRequest(BaseModel):
+    profile_id: str = ""
+
+
 class GoogleDriveImportRequest(BaseModel):
     file_id: str
     metadata_file_id: str = ""
     cover_file_id: str = ""
+    file_name: str = ""
+    metadata_file_name: str = ""
+    cover_file_name: str = ""
+    resource_key: str = ""
+    metadata_resource_key: str = ""
+    cover_resource_key: str = ""
 
 
 class BookmarkUpdateRequest(BaseModel):
@@ -195,6 +205,9 @@ class ActivePlaybackStateRequest(BaseModel):
     drive_file_id: str = ""
     drive_metadata_file_id: str = ""
     drive_cover_file_id: str = ""
+    drive_resource_key: str = ""
+    drive_metadata_resource_key: str = ""
+    drive_cover_resource_key: str = ""
     size_bytes: int = 0
 
 async def cleanup_task():
@@ -230,9 +243,36 @@ async def index():
     async with aiofiles.open("index.html", "r", encoding="utf-8") as f:
         return await f.read()
 
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return RedirectResponse(url="/static/favicon.svg", status_code=307)
+
 @app.get("/api/settings/folder")
 async def get_folder():
     return {"folder": config.DOWNLOADS_DIR}
+
+
+@app.get("/api/settings/playback-profile")
+async def get_playback_profile():
+    return {
+        **config.get_playback_profile_status(),
+        **bookmark_service.get_state_storage_status(),
+    }
+
+
+@app.post("/api/settings/playback-profile")
+async def save_playback_profile(request: PlaybackProfileRequest):
+    try:
+        config.save_playback_profile_id(request.profile_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "status": "success",
+        **config.get_playback_profile_status(),
+        **bookmark_service.get_state_storage_status(),
+    }
+
 
 @app.post("/api/settings/choose_folder")
 async def choose_folder():
@@ -335,6 +375,12 @@ async def google_drive_import(request: GoogleDriveImportRequest):
             request.file_id,
             request.metadata_file_id,
             request.cover_file_id,
+            request.file_name,
+            request.metadata_file_name,
+            request.cover_file_name,
+            request.resource_key,
+            request.metadata_resource_key,
+            request.cover_resource_key,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -345,9 +391,25 @@ async def google_drive_import(request: GoogleDriveImportRequest):
 
 
 @app.get("/api/google-drive/metadata/{file_id}")
-async def google_drive_metadata(file_id: str, metadata_file_id: str = "", cover_file_id: str = ""):
+async def google_drive_metadata(
+    file_id: str,
+    metadata_file_id: str = "",
+    cover_file_id: str = "",
+    file_name: str = "",
+    resource_key: str = "",
+    metadata_resource_key: str = "",
+    cover_resource_key: str = "",
+):
     try:
-        return await google_drive_service.build_google_drive_metadata(file_id, metadata_file_id, cover_file_id)
+        return await google_drive_service.build_google_drive_metadata(
+            file_id,
+            metadata_file_id,
+            cover_file_id,
+            file_name,
+            resource_key,
+            metadata_resource_key,
+            cover_resource_key,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except httpx.HTTPStatusError as exc:
@@ -355,12 +417,24 @@ async def google_drive_metadata(file_id: str, metadata_file_id: str = "", cover_
         raise HTTPException(status_code=502, detail="Google Drive metadata request failed") from exc
 
 
+@app.get("/api/google-drive/files/{file_id}/probe")
+async def google_drive_probe_file(file_id: str, resource_key: str = ""):
+    try:
+        return await google_drive_service.probe_google_drive_stream(file_id, resource_key)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Google Drive stream probe failed")
+        raise HTTPException(status_code=502, detail="Google Drive file probe failed") from exc
+
+
 @app.get("/api/google-drive/files/{file_id}/stream")
-async def google_drive_stream_file(file_id: str, request: Request):
+async def google_drive_stream_file(file_id: str, request: Request, resource_key: str = ""):
     try:
         client, response, headers = await google_drive_service.open_google_drive_stream(
             file_id,
             request.headers.get("range", ""),
+            resource_key,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

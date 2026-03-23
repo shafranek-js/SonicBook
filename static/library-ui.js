@@ -81,6 +81,10 @@ async function loadImportedDriveBookIds() {
     (data.book_ids || []).forEach((bookId) => {
         if (bookId) {
             importedDriveBookIds.add(bookId);
+            const suffix = String(bookId).startsWith('book:file:') ? String(bookId).slice('book:file:'.length) : '';
+            if (suffix.includes(':')) {
+                importedDriveBookIds.add(`book:file:${suffix.replace(/:\d+$/, '')}`);
+            }
         }
     });
 }
@@ -250,14 +254,19 @@ function renderDriveLibraryItem(file, t) {
              data-duration-seconds="${Number(file.durationSeconds) || 0}"
              data-size-bytes="${Number(file.size_bytes) || 0}"
              data-metadata-file-id="${escapeHtml(file.drive_metadata_file_id || '')}"
-             data-cover-file-id="${escapeHtml(file.drive_cover_file_id || '')}">
+             data-cover-file-id="${escapeHtml(file.drive_cover_file_id || '')}"
+             data-metadata-file-name="${escapeHtml(file.drive_metadata_name || '')}"
+             data-cover-file-name="${escapeHtml(file.drive_cover_name || '')}"
+             data-resource-key="${escapeHtml(file.resource_key || '')}"
+             data-metadata-resource-key="${escapeHtml(file.drive_metadata_resource_key || '')}"
+             data-cover-resource-key="${escapeHtml(file.drive_cover_resource_key || '')}">
             <div class="library-bg-fill" style="width: ${file.fillPct || 0}%;"></div>
             <div class="library-item-info">
                 <div class="library-item-title">${escapeHtml(file.name)}</div>
                 <div class="library-item-meta">
                     ${durationLabel ? `<span class="library-meta-pill timecode">${durationLabel}</span>` : ''}
                     ${file.chapterCount ? `<span class="library-meta-pill timecode">${file.chapterCount} ${t.chapterCountShort}</span>` : ''}
-                    <span class="library-meta-pill timecode">${file.size_mb} MB</span>
+                    ${file.size_mb > 0 ? `<span class="library-meta-pill timecode">${file.size_mb} MB</span>` : ''}
                     ${date ? `<span class="library-meta-pill timecode">${date}</span>` : ''}
                 </div>
             </div>
@@ -460,6 +469,11 @@ async function importDriveBook(event, fileName) {
     const metadataFileId = row.dataset.metadataFileId || '';
     const coverFileId = row.dataset.coverFileId || '';
     const driveFileId = row.dataset.driveFileId || '';
+    const metadataFileName = row.dataset.metadataFileName || '';
+    const coverFileName = row.dataset.coverFileName || '';
+    const resourceKey = row.dataset.resourceKey || '';
+    const metadataResourceKey = row.dataset.metadataResourceKey || '';
+    const coverResourceKey = row.dataset.coverResourceKey || '';
     if (!driveFileId) {
         setStatusMessage(t.googleDriveLibraryError, 'error');
         return;
@@ -478,7 +492,13 @@ async function importDriveBook(event, fileName) {
             body: JSON.stringify({
                 file_id: driveFileId,
                 metadata_file_id: metadataFileId,
-                cover_file_id: coverFileId
+                cover_file_id: coverFileId,
+                file_name: fileName,
+                metadata_file_name: metadataFileName,
+                cover_file_name: coverFileName,
+                resource_key: resourceKey,
+                metadata_resource_key: metadataResourceKey,
+                cover_resource_key: coverResourceKey
             })
         });
         const data = await res.json();
@@ -510,6 +530,11 @@ function buildDriveItemFromRow(row) {
         drive_file_id: row.dataset.driveFileId || '',
         drive_metadata_file_id: row.dataset.metadataFileId || '',
         drive_cover_file_id: row.dataset.coverFileId || '',
+        drive_metadata_name: row.dataset.metadataFileName || '',
+        drive_cover_name: row.dataset.coverFileName || '',
+        resource_key: row.dataset.resourceKey || '',
+        drive_metadata_resource_key: row.dataset.metadataResourceKey || '',
+        drive_cover_resource_key: row.dataset.coverResourceKey || '',
         size_bytes: Number(row.dataset.sizeBytes) || 0,
         source: 'google_drive',
         streamable: true

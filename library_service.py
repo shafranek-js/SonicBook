@@ -197,17 +197,10 @@ def list_library_book_ids(downloads_dir: str) -> list[str]:
         name = item.get("name", "")
         size_bytes = int(item.get("size_bytes") or 0)
 
-        candidates = [
-            item.get("book_id", ""),
-            bookmark_service.build_book_id(name, size_bytes=size_bytes),
-            bookmark_service.build_legacy_book_id(name),
-        ]
-        candidates.extend(
-            bookmark_service.build_book_id_aliases(
-                name=name,
-                size_bytes=size_bytes,
-                book_id=item.get("book_id", ""),
-            )
+        candidates = bookmark_service.build_book_id_aliases(
+            name=name,
+            size_bytes=size_bytes,
+            book_id=item.get("book_id", ""),
         )
 
         for candidate in candidates:

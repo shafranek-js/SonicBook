@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import os
 import re
@@ -10,7 +11,9 @@ import config
 BOOK_PREFIX = "book:"
 BOOK_FILE_PREFIX = "book:file:"
 STATE_DIR_NAME = ".sonicbook-state"
+STATE_PROFILES_DIR_NAME = "profiles"
 STATE_FILE_NAME = "playback_state.json"
+LEGACY_MIGRATION_MARKER = ".profiles-migrated"
 STATE_VERSION = 1
 LEGACY_BOOKMARKS_FILE = os.path.join(config.BASE_DIR, "bookmarks.json")
 
@@ -93,8 +96,35 @@ def _shared_state_dir() -> str:
     return os.path.join(config.DOWNLOADS_DIR, STATE_DIR_NAME)
 
 
-def _shared_state_file() -> str:
+def _legacy_shared_state_file() -> str:
     return os.path.join(_shared_state_dir(), STATE_FILE_NAME)
+
+
+def _legacy_migration_marker_file() -> str:
+    return os.path.join(_shared_state_dir(), LEGACY_MIGRATION_MARKER)
+
+
+def _active_profile_status() -> dict:
+    return config.get_playback_profile_status()
+
+
+def _profile_storage_slug(profile_id: str) -> str:
+    normalized = str(profile_id or "").strip().lower()
+    if not normalized:
+        normalized = "device"
+    safe = re.sub(r"[^a-z0-9._-]+", "-", normalized).strip("-.")
+    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:10]
+    base = safe[:48].rstrip("-.") or "profile"
+    return f"{base}-{digest}"
+
+
+def _profile_state_dir(profile_id: str = "") -> str:
+    active_profile_id = str(profile_id or _active_profile_status().get("profile_id") or "").strip()
+    return os.path.join(_shared_state_dir(), STATE_PROFILES_DIR_NAME, _profile_storage_slug(active_profile_id))
+
+
+def _shared_state_file() -> str:
+    return os.path.join(_profile_state_dir(), STATE_FILE_NAME)
 
 
 def _default_state() -> dict:
@@ -107,9 +137,20 @@ def _default_state() -> dict:
 
 
 def _ensure_shared_state_dir() -> str:
-    state_dir = _shared_state_dir()
+    state_dir = _profile_state_dir()
     os.makedirs(state_dir, exist_ok=True)
     return state_dir
+
+
+def get_state_storage_status() -> dict:
+    profile = _active_profile_status()
+    return {
+        "profile_id": profile.get("profile_id", ""),
+        "configured_id": profile.get("configured_id", ""),
+        "source": profile.get("source", "device"),
+        "state_file": _shared_state_file(),
+        "legacy_state_file": _legacy_shared_state_file(),
+    }
 
 
 def _load_json_file(path: str):
@@ -120,6 +161,15 @@ def _load_json_file(path: str):
             return json.load(f)
     except Exception:
         return None
+
+
+def _write_marker_file(path: str) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(str(int(time.time())))
+    except Exception:
+        pass
 
 
 def _normalize_last_active(payload: dict | None) -> dict:
@@ -134,6 +184,9 @@ def _normalize_last_active(payload: dict | None) -> dict:
         "drive_file_id": str(payload.get("drive_file_id") or "").strip(),
         "drive_metadata_file_id": str(payload.get("drive_metadata_file_id") or "").strip(),
         "drive_cover_file_id": str(payload.get("drive_cover_file_id") or "").strip(),
+        "drive_resource_key": str(payload.get("drive_resource_key") or "").strip(),
+        "drive_metadata_resource_key": str(payload.get("drive_metadata_resource_key") or "").strip(),
+        "drive_cover_resource_key": str(payload.get("drive_cover_resource_key") or "").strip(),
         "size_bytes": int(payload.get("size_bytes") or 0),
         "updated_at": float(payload.get("updated_at") or 0),
     }
@@ -189,6 +242,15 @@ def _migrate_legacy_bookmarks_if_needed() -> dict | None:
     if os.path.exists(state_path):
         return None
 
+    marker_path = _legacy_migration_marker_file()
+    if not os.path.exists(marker_path):
+        legacy_shared_payload = _load_json_file(_legacy_shared_state_file())
+        if isinstance(legacy_shared_payload, dict):
+            migrated_state = _normalize_state_payload(legacy_shared_payload)
+            _save_state(migrated_state)
+            _write_marker_file(marker_path)
+            return migrated_state
+
     legacy_payload = _load_json_file(LEGACY_BOOKMARKS_FILE)
     if not isinstance(legacy_payload, dict):
         return None
@@ -196,6 +258,7 @@ def _migrate_legacy_bookmarks_if_needed() -> dict | None:
     migrated_state = _default_state()
     migrated_state["bookmarks"] = legacy_payload
     _save_state(migrated_state)
+    _write_marker_file(marker_path)
     return migrated_state
 
 

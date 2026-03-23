@@ -1,5 +1,5 @@
 let playerState = {
-    mode: 'single', duration: 0, chapters: [], playlist: [], currentTrackIndex: 0, fileName: null, bookTitle: "", tempCoverUrl: null, source: 'local', streamUrl: null, bookmarkKey: null, bookId: null, driveFileId: '', driveMetadataFileId: '', driveCoverFileId: '', sizeBytes: 0
+    mode: 'single', duration: 0, chapters: [], playlist: [], currentTrackIndex: 0, fileName: null, bookTitle: "", tempCoverUrl: null, source: 'local', streamUrl: null, bookmarkKey: null, bookId: null, driveFileId: '', driveMetadataFileId: '', driveCoverFileId: '', driveResourceKey: '', driveMetadataResourceKey: '', driveCoverResourceKey: '', sizeBytes: 0
 };
 
 const audio = document.getElementById('audioElement');
@@ -54,8 +54,20 @@ function getCurrentDriveStreamFileId() {
     if (!playerState.streamUrl) {
         return '';
     }
-    const match = playerState.streamUrl.match(/\/api\/google-drive\/files\/([^/]+)\/stream$/);
+    const match = playerState.streamUrl.split('?')[0].match(/\/api\/google-drive\/files\/([^/]+)\/stream$/);
     return match ? decodeURIComponent(match[1]) : '';
+}
+
+function buildGoogleDriveStreamUrl(fileId, resourceKey = '') {
+    if (!fileId) {
+        return '';
+    }
+    const params = new URLSearchParams();
+    if (resourceKey) {
+        params.set('resource_key', resourceKey);
+    }
+    const suffix = params.toString();
+    return `/api/google-drive/files/${encodeURIComponent(fileId)}/stream${suffix ? `?${suffix}` : ''}`;
 }
 
 function setDriveStreamBuffering(fileId, isBuffering = true, syncStatus = true) {
@@ -130,6 +142,9 @@ function buildActivePlaybackPayload() {
         drive_file_id: playerState.driveFileId || '',
         drive_metadata_file_id: playerState.driveMetadataFileId || '',
         drive_cover_file_id: playerState.driveCoverFileId || '',
+        drive_resource_key: playerState.driveResourceKey || '',
+        drive_metadata_resource_key: playerState.driveMetadataResourceKey || '',
+        drive_cover_resource_key: playerState.driveCoverResourceKey || '',
         size_bytes: Number(playerState.sizeBytes) || 0
     };
 }
@@ -532,6 +547,9 @@ async function initPlayer(fileName, autoOpenChapters = false, autoPlay = false) 
     playerState.driveFileId = '';
     playerState.driveMetadataFileId = '';
     playerState.driveCoverFileId = '';
+    playerState.driveResourceKey = '';
+    playerState.driveMetadataResourceKey = '';
+    playerState.driveCoverResourceKey = '';
     playerState.sizeBytes = 0;
     appState.showPlayer = true;
     appState.showPreview = false;
@@ -630,12 +648,15 @@ async function initDrivePlayer(item, autoPlay = true, autoOpenChapters = false) 
     playerState.currentTrackIndex = 0;
     playerState.mode = 'single';
     playerState.source = 'google_drive';
-    playerState.streamUrl = `/api/google-drive/files/${encodeURIComponent(item.drive_file_id)}/stream`;
+    playerState.streamUrl = buildGoogleDriveStreamUrl(item.drive_file_id, item.resource_key || '');
     playerState.bookmarkKey = `bookmark_drive_${item.drive_file_id}`;
     playerState.bookId = item.book_id || buildClientBookId(item.name, item.size_bytes);
     playerState.driveFileId = item.drive_file_id || '';
     playerState.driveMetadataFileId = item.drive_metadata_file_id || '';
     playerState.driveCoverFileId = item.drive_cover_file_id || '';
+    playerState.driveResourceKey = item.resource_key || '';
+    playerState.driveMetadataResourceKey = item.drive_metadata_resource_key || '';
+    playerState.driveCoverResourceKey = item.drive_cover_resource_key || '';
     playerState.sizeBytes = Number(item.size_bytes) || 0;
     appState.showPlayer = true;
     appState.showPreview = false;
@@ -665,6 +686,10 @@ async function initDrivePlayer(item, autoPlay = true, autoOpenChapters = false) 
         const query = new URLSearchParams({
             metadata_file_id: item.drive_metadata_file_id || '',
             cover_file_id: item.drive_cover_file_id || '',
+            file_name: item.name || '',
+            resource_key: item.resource_key || '',
+            metadata_resource_key: item.drive_metadata_resource_key || '',
+            cover_resource_key: item.drive_cover_resource_key || '',
         });
         const res = await fetch(`/api/google-drive/metadata/${encodeURIComponent(item.drive_file_id)}?${query.toString()}`);
         if (res.ok) {

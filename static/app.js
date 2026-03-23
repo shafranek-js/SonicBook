@@ -32,15 +32,33 @@ const i18n = {
         progressDownloading: "Downloading",
         progressAssembling: "Assembling",
         libTooltip: "Library", themeTooltip: "Theme", langTooltip: "Language", settingsTooltip: "Settings", settingsTitle: "Settings", clearAllDataBtn: "Clear all app data & cache", languageLabel: "Language", downloadAnotherTooltip: "Download another",
+        playbackProfileLabel: "Sync profile",
+        playbackProfilePlaceholder: "Your email or private profile name",
+        playbackProfileHint: "Use the same sync profile on your own devices to share progress. Other people should keep a different profile.",
+        playbackProfileSave: "Save profile",
+        playbackProfileSaved: "Sync profile saved.",
+        playbackProfileAutoGoogle: "Google account profile",
+        playbackProfileManual: "Custom profile",
+        playbackProfileDevice: "This device only",
+        playbackProfileLabel: "Профиль синхронизации",
+        playbackProfilePlaceholder: "Ваш email или приватное имя профиля",
+        playbackProfileHint: "На своих устройствах используйте один и тот же профиль, чтобы делить прогресс. Другим людям нужен другой профиль.",
+        playbackProfileSave: "Сохранить профиль",
+        playbackProfileSaved: "Профиль синхронизации сохранен.",
+        playbackProfileAutoGoogle: "Профиль Google-аккаунта",
+        playbackProfileManual: "Свой профиль",
+        playbackProfileDevice: "Только это устройство",
         googleDriveLabel: "Google Drive",
         googleDriveFolderPlaceholder: "Drive folder ID or shared link",
-        googleDriveHint: "Connect your Google account and enter either the folder ID or a shared Google Drive folder link.",
+        googleDriveHint: "Paste a shared Google Drive folder link to browse public books without OAuth, or connect Google for private folders.",
         googleDriveConnect: "Connect",
         googleDriveDisconnect: "Disconnect",
         googleDriveSaveFolder: "Save folder",
         googleDriveStatusConnected: "Connected",
         googleDriveStatusDisconnected: "Not connected",
         googleDriveStatusNotConfigured: "Not configured",
+        googleDriveStatusPublicLink: "Public link mode",
+        googleDriveStatusSharedLinksOnly: "Shared links only",
         googleDriveStatusConnecting: "Connecting...",
         googleDriveStatusSaving: "Saving...",
         googleDriveFolderSaved: "Google Drive folder saved.",
@@ -60,9 +78,9 @@ const i18n = {
         googleDriveRefreshing: "Refreshing Drive library...",
         googleDriveLibraryTitle: "Google Drive Library",
         googleDriveLibraryEmpty: "No supported audiobook files found in the configured Drive folder.",
-        googleDriveLibraryHint: "Connect Google Drive and save a folder ID to browse remote books here.",
+        googleDriveLibraryHint: "Save a shared folder link or connect Google Drive to browse remote books here.",
         googleDriveLibraryError: "Could not load Google Drive library",
-        googleDriveLibraryErrorHint: "Check the account connection, folder ID, or Google API configuration.",
+        googleDriveLibraryErrorHint: "Check the shared folder link, account connection, or network access to Google Drive.",
         chaptersTooltip: "Show or hide chapter list",
         chapterCountShort: "ch",
         resetTooltip: "Reset playback progress",
@@ -105,13 +123,15 @@ const i18n = {
         libTooltip: "Библиотека", themeTooltip: "Тема", langTooltip: "Язык", settingsTooltip: "Настройки", settingsTitle: "Настройки", clearAllDataBtn: "Очистить все данные приложения и кэш", languageLabel: "Язык", downloadAnotherTooltip: "Загрузить еще одну",
         googleDriveLabel: "Google Drive",
         googleDriveFolderPlaceholder: "ID папки Drive или shared link",
-        googleDriveHint: "Подключите Google-аккаунт и укажите либо ID папки, либо shared link на папку Google Drive.",
+        googleDriveHint: "Вставьте shared link на папку Google Drive, чтобы открыть публичную библиотеку без OAuth, или подключите Google для приватных папок.",
         googleDriveConnect: "Подключить",
         googleDriveDisconnect: "Отключить",
         googleDriveSaveFolder: "Сохранить папку",
         googleDriveStatusConnected: "Подключено",
         googleDriveStatusDisconnected: "Не подключено",
         googleDriveStatusNotConfigured: "Не настроено",
+        googleDriveStatusPublicLink: "Публичная ссылка",
+        googleDriveStatusSharedLinksOnly: "Только shared link",
         googleDriveStatusConnecting: "Подключение...",
         googleDriveStatusSaving: "Сохранение...",
         googleDriveFolderSaved: "Папка Google Drive сохранена.",
@@ -131,9 +151,9 @@ const i18n = {
         googleDriveRefreshing: "Обновление библиотеки Drive...",
         googleDriveLibraryTitle: "Библиотека Google Drive",
         googleDriveLibraryEmpty: "В выбранной папке Drive не найдено поддерживаемых аудиокниг.",
-        googleDriveLibraryHint: "Подключите Google Drive и сохраните ID папки, чтобы видеть удалённые книги здесь.",
+        googleDriveLibraryHint: "Сохраните shared link на папку или подключите Google Drive, чтобы видеть удалённые книги здесь.",
         googleDriveLibraryError: "Не удалось загрузить библиотеку Google Drive",
-        googleDriveLibraryErrorHint: "Проверьте подключение, ID папки или настройки Google API.",
+        googleDriveLibraryErrorHint: "Проверьте shared link, подключение аккаунта или доступ сети к Google Drive.",
         chaptersTooltip: "Показать или скрыть список глав",
         chapterCountShort: "гл.",
         resetTooltip: "Сбросить прогресс прослушивания",
@@ -163,6 +183,7 @@ const appState = {
     googleDrive: {
         configured: false,
         connected: false,
+        publicLinkMode: false,
         folderId: '',
         accountEmail: '',
         accountName: '',
@@ -173,6 +194,29 @@ const appState = {
     bookmarks: {},
     lastActivePlayback: null,
     sharedStateStatus: 'syncing'
+};
+i18n.en.playbackProfileLabel = "Sync profile";
+i18n.en.playbackProfilePlaceholder = "Your email or private profile name";
+i18n.en.playbackProfileHint = "Use the same sync profile on your own devices to share progress. Other people should keep a different profile.";
+i18n.en.playbackProfileSave = "Save profile";
+i18n.en.playbackProfileSaved = "Sync profile saved.";
+i18n.en.playbackProfileAutoGoogle = "Google account profile";
+i18n.en.playbackProfileManual = "Custom profile";
+i18n.en.playbackProfileDevice = "This device only";
+i18n.ru.playbackProfileLabel = "Профиль синхронизации";
+i18n.ru.playbackProfilePlaceholder = "Ваш email или приватное имя профиля";
+i18n.ru.playbackProfileHint = "На своих устройствах используйте один и тот же профиль, чтобы делить прогресс. Другим людям нужен другой профиль.";
+i18n.ru.playbackProfileSave = "Сохранить профиль";
+i18n.ru.playbackProfileSaved = "Профиль синхронизации сохранен.";
+i18n.ru.playbackProfileAutoGoogle = "Профиль Google-аккаунта";
+i18n.ru.playbackProfileManual = "Свой профиль";
+i18n.ru.playbackProfileDevice = "Только это устройство";
+appState.playbackProfile = {
+    configuredId: '',
+    resolvedId: '',
+    source: 'device',
+    stateFile: '',
+    loading: false
 };
 let playerLayoutFrame = null;
 let mainDragDepth = 0;
@@ -255,6 +299,9 @@ function normalizeLastActivePlayback(payload) {
         drive_file_id: String(payload.drive_file_id || '').trim(),
         drive_metadata_file_id: String(payload.drive_metadata_file_id || '').trim(),
         drive_cover_file_id: String(payload.drive_cover_file_id || '').trim(),
+        drive_resource_key: String(payload.drive_resource_key || '').trim(),
+        drive_metadata_resource_key: String(payload.drive_metadata_resource_key || '').trim(),
+        drive_cover_resource_key: String(payload.drive_cover_resource_key || '').trim(),
         size_bytes: Number(payload.size_bytes) || 0,
         updated_at: Number(payload.updated_at) || 0
     };
@@ -323,6 +370,9 @@ function buildDriveRestoreItem(lastActive) {
         drive_file_id: normalized.drive_file_id,
         drive_metadata_file_id: normalized.drive_metadata_file_id || '',
         drive_cover_file_id: normalized.drive_cover_file_id || '',
+        resource_key: normalized.drive_resource_key || '',
+        drive_metadata_resource_key: normalized.drive_metadata_resource_key || '',
+        drive_cover_resource_key: normalized.drive_cover_resource_key || '',
         size_bytes: normalized.size_bytes || 0,
         source: 'google_drive',
         streamable: true
@@ -334,7 +384,11 @@ async function restoreSharedPlaybackState() {
     const sharedPlayback = appState.lastActivePlayback;
     const localLastFile = localStorage.getItem('last-played-file');
 
-    if (sharedPlayback?.source === 'google_drive' && sharedPlayback.drive_file_id && appState.googleDrive.connected) {
+    if (
+        sharedPlayback?.source === 'google_drive' &&
+        sharedPlayback.drive_file_id &&
+        (appState.googleDrive.connected || appState.googleDrive.publicLinkMode)
+    ) {
         resetForm();
         appState.step = 'done';
         appState.mainButtonLabelOverride = '';
@@ -395,22 +449,62 @@ function syncSharedStateIndicator() {
         return;
     }
     const t = i18n[appState.currentLang];
+    const profileSuffix = appState.playbackProfile?.resolvedId
+        ? ` (${appState.playbackProfile.resolvedId})`
+        : '';
     badge.classList.remove('is-ready', 'is-syncing', 'is-error');
     if (appState.sharedStateStatus === 'ready') {
         badge.classList.add('is-ready');
         badge.innerText = t.librarySyncReady;
-        badge.title = t.librarySyncReady;
+        badge.title = t.librarySyncReady + profileSuffix;
         return;
     }
     if (appState.sharedStateStatus === 'error') {
         badge.classList.add('is-error');
         badge.innerText = t.librarySyncUnavailable;
-        badge.title = t.librarySyncUnavailable;
+        badge.title = t.librarySyncUnavailable + profileSuffix;
         return;
     }
     badge.classList.add('is-syncing');
     badge.innerText = t.librarySyncLoading;
-    badge.title = t.librarySyncLoading;
+    badge.title = t.librarySyncLoading + profileSuffix;
+}
+
+function syncPlaybackProfileUI() {
+    const badge = document.getElementById('playbackProfileStatusBadge');
+    const input = document.getElementById('playbackProfileInput');
+    const saveBtn = document.getElementById('playbackProfileSaveBtn');
+    const hint = document.getElementById('playbackProfileHint');
+    const t = i18n[appState.currentLang];
+    if (!badge || !input || !saveBtn || !hint) {
+        return;
+    }
+
+    input.placeholder = t.playbackProfilePlaceholder;
+    input.value = appState.playbackProfile.configuredId
+        || (appState.playbackProfile.source === 'google_account' ? appState.playbackProfile.resolvedId : '');
+    saveBtn.innerText = t.playbackProfileSave;
+    saveBtn.disabled = !!appState.playbackProfile.loading;
+    input.disabled = !!appState.playbackProfile.loading;
+
+    badge.className = 'settings-status-badge';
+    if (appState.playbackProfile.source === 'google_account') {
+        badge.classList.add('settings-status-success');
+        badge.innerText = t.playbackProfileAutoGoogle;
+    } else if (appState.playbackProfile.source === 'manual') {
+        badge.classList.add('settings-status-success');
+        badge.innerText = t.playbackProfileManual;
+    } else {
+        badge.classList.add('settings-status-idle');
+        badge.innerText = t.playbackProfileDevice;
+    }
+
+    hint.innerText = t.playbackProfileHint;
+    if (appState.playbackProfile.resolvedId) {
+        badge.title = `${badge.innerText}: ${appState.playbackProfile.resolvedId}`;
+    } else {
+        badge.title = badge.innerText;
+    }
 }
 
 function syncMainSurfaceState() {
@@ -654,6 +748,7 @@ function updateUI() {
     document.getElementById('settingsLangBtn').innerText = appState.currentLang === 'en' ? 'RU' : 'EN';
     document.getElementById('t-found').innerText = t.found;
     document.getElementById('t-language-label').innerText = t.languageLabel;
+    document.getElementById('t-playback-profile-label').innerText = t.playbackProfileLabel;
     document.getElementById('t-google-drive-label').innerText = t.googleDriveLabel;
     document.getElementById('t-save-path').innerText = t.saveTo;
     document.getElementById('t-settings-title').innerText = t.settingsTitle;
@@ -693,6 +788,7 @@ function updateUI() {
     document.getElementById('settingsLangBtn').title = t.langTooltip;
     document.getElementById('settingsLangBtn').setAttribute('aria-label', t.langTooltip);
     syncSharedStateIndicator();
+    syncPlaybackProfileUI();
     syncGoogleDriveSettingsUI();
     syncLibrarySourceUI();
 
@@ -792,15 +888,18 @@ function syncGoogleDriveSettingsUI() {
     folderInput.value = appState.googleDrive.folderId || '';
     badge.className = 'settings-status-badge';
     let statusText = t.googleDriveStatusDisconnected;
-    if (!appState.googleDrive.configured) {
-        badge.classList.add('settings-status-warning');
-        statusText = t.googleDriveStatusNotConfigured;
+    if (appState.googleDrive.publicLinkMode) {
+        badge.classList.add('settings-status-success');
+        statusText = t.googleDriveStatusPublicLink;
     } else if (appState.googleDrive.connected) {
         badge.classList.add('settings-status-success');
         statusText = appState.googleDrive.accountEmail || appState.googleDrive.accountName || t.googleDriveStatusConnected;
     } else if (appState.googleDrive.loading) {
         badge.classList.add('settings-status-pending');
         statusText = t.googleDriveStatusConnecting;
+    } else if (!appState.googleDrive.configured) {
+        badge.classList.add('settings-status-idle');
+        statusText = t.googleDriveStatusSharedLinksOnly;
     } else {
         badge.classList.add('settings-status-idle');
         statusText = t.googleDriveStatusDisconnected;
@@ -809,8 +908,8 @@ function syncGoogleDriveSettingsUI() {
 
     connectBtn.hidden = !appState.googleDrive.configured || appState.googleDrive.connected;
     disconnectBtn.hidden = !appState.googleDrive.connected;
-    const disableMutations = appState.googleDrive.loading || !appState.googleDrive.configured;
-    connectBtn.disabled = disableMutations;
+    const disableMutations = appState.googleDrive.loading;
+    connectBtn.disabled = appState.googleDrive.loading || !appState.googleDrive.configured;
     disconnectBtn.disabled = appState.googleDrive.loading;
     saveFolderBtn.disabled = disableMutations;
     folderInput.disabled = disableMutations;
@@ -912,6 +1011,28 @@ function initSettingsMenu() {
     });
 }
 
+async function loadPlaybackProfileStatus() {
+    try {
+        const res = await fetch('/api/settings/playback-profile');
+        if (!res.ok) {
+            throw new Error('playback-profile');
+        }
+        const data = await res.json();
+        appState.playbackProfile.configuredId = data.configured_id || '';
+        appState.playbackProfile.resolvedId = data.profile_id || '';
+        appState.playbackProfile.source = data.source || 'device';
+        appState.playbackProfile.stateFile = data.state_file || '';
+    } catch (e) {
+        appState.playbackProfile.configuredId = '';
+        appState.playbackProfile.resolvedId = '';
+        appState.playbackProfile.source = 'device';
+        appState.playbackProfile.stateFile = '';
+    } finally {
+        appState.playbackProfile.loading = false;
+        updateUI();
+    }
+}
+
 async function loadGoogleDriveStatus() {
     try {
         const res = await fetch('/api/google-drive/status');
@@ -921,17 +1042,54 @@ async function loadGoogleDriveStatus() {
         const data = await res.json();
         appState.googleDrive.configured = !!data.configured;
         appState.googleDrive.connected = !!data.connected;
+        appState.googleDrive.publicLinkMode = !!data.public_link_mode;
         appState.googleDrive.folderId = data.folder_id || '';
         appState.googleDrive.accountEmail = data.account_email || '';
         appState.googleDrive.accountName = data.account_name || '';
     } catch (e) {
         appState.googleDrive.configured = false;
         appState.googleDrive.connected = false;
+        appState.googleDrive.publicLinkMode = false;
         appState.googleDrive.folderId = '';
         appState.googleDrive.accountEmail = '';
         appState.googleDrive.accountName = '';
     } finally {
         appState.googleDrive.loading = false;
+        updateUI();
+    }
+}
+
+async function savePlaybackProfile() {
+    const t = i18n[appState.currentLang];
+    const input = document.getElementById('playbackProfileInput');
+    const profileId = (input?.value || '').trim();
+    appState.playbackProfile.loading = true;
+    updateUI();
+    try {
+        const res = await fetch('/api/settings/playback-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_id: profileId })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.detail || 'save-playback-profile');
+        }
+        appState.playbackProfile.configuredId = data.configured_id || '';
+        appState.playbackProfile.resolvedId = data.profile_id || '';
+        appState.playbackProfile.source = data.source || 'device';
+        appState.playbackProfile.stateFile = data.state_file || '';
+        setStatusMessage(t.playbackProfileSaved, 'success');
+        await loadBookmarkSummary();
+        if (document.getElementById('appContainer')?.classList.contains('library-open')) {
+            loadLibrary();
+        } else {
+            updateUI();
+        }
+    } catch (e) {
+        setStatusMessage(String(e.message || e), 'error');
+    } finally {
+        appState.playbackProfile.loading = false;
         updateUI();
     }
 }
@@ -967,6 +1125,7 @@ async function disconnectGoogleDrive() {
             throw new Error(data.detail || 'disconnect');
         }
         appState.googleDrive.connected = false;
+        appState.googleDrive.publicLinkMode = !!appState.googleDrive.folderId;
         appState.googleDrive.accountEmail = '';
         appState.googleDrive.accountName = '';
         setStatusMessage(t.googleDriveDisconnected, 'success');
@@ -1025,6 +1184,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     initSettingsMenu();
     initDragAndDrop();
     await loadGoogleDriveStatus();
+    await loadPlaybackProfileStatus();
     await restoreSharedPlaybackState();
     if (shouldOpenLibrary) {
         loadLibrary();
