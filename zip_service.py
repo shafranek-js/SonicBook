@@ -20,6 +20,14 @@ def get_zip_extraction_lock(extract_dir_name: str) -> asyncio.Lock:
 
 def extract_zip_archive(zip_path: str, extract_dir_path: str):
     with zipfile.ZipFile(zip_path, "r") as archive:
+        # Prevent Zip Slip vulnerability (path traversal)
+        # by verifying that all members are within the destination directory.
+        resolved_extract_dir = os.path.abspath(extract_dir_path)
+        for member in archive.infolist():
+            target_path = os.path.abspath(os.path.join(resolved_extract_dir, member.filename))
+            if not target_path.startswith(resolved_extract_dir + os.sep) and target_path != resolved_extract_dir:
+                raise ValueError(f"Malicious member path detected: {member.filename}")
+
         archive.extractall(extract_dir_path)
 
 
