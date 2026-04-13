@@ -17,7 +17,7 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
         -   `/api/progress/stream/{task_id}`: Streams download/assembly progress over SSE.
         -   `/api/files/{file_name:path}`: Streams audio files (supports `Range` requests and subdirectories for ZIPs).
         -   `/api/library`: Lists all local downloads.
-        -   `/api/metadata/{file_name}`: Fetches chapter metadata JSON (and extracts ZIPs on-the-fly for playback).
+        -   `/api/metadata/{file_name}`: Fetches chapter metadata JSON. For ZIP archives, this endpoint automatically extracts the contents into a hidden `.extracted_{base_name}` folder on-demand, allowing the player to sequentially stream the individual audio files directly from the archive.
         -   `/api/settings/choose_folder`: Opens a native folder selection dialog.
     -   Maintains an in-memory `progress_store` with timestamp refresh on active writes so long-running jobs are not evicted mid-download.
     -   Runs a background `cleanup_task` within the FastAPI `lifespan`.

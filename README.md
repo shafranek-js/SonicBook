@@ -5,7 +5,7 @@
 ## ✨ Features
 
 -   **Extreme Speed:** Downloads book fragments in **16 concurrent streams**.
--   **Integrated Web Player:** Stream your books directly in the browser with **M4B chapter support**, **ZIP playlist sequential playback**, **keyboard shortcuts**, and **Media Session** integration.
+-   **Integrated Web Player:** Stream your books directly in the browser with **M4B chapter support**, **ZIP playlist sequential playback** (automatically extracts ZIP contents into a hidden folder on-demand for playback), **keyboard shortcuts**, and **Media Session** integration.
 -   **Refined Player Controls:** The built-in player uses standard media-style transport controls and a visually unified chapter button instead of emoji-driven buttons.
 -   **Visual Playback Progress:** Watch your progress in real-time with matching indigo background fills in both the chapter panel and the library list, plus dynamic chapter timers.
 -   **Smart Library:** Manage and browse all your downloads in a sleek sliding side panel. Selecting a book restores playback and auto-opens the chapter panel when metadata is available.

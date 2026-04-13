@@ -372,6 +372,28 @@ async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
     shutil.rmtree(temp_dir)
     return merged_file
 
+
+async def download_single_file(url, dest_path, progress_callback):
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    async with httpx.AsyncClient(http2=False, follow_redirects=True) as client:
+        async with client.stream("GET", url, timeout=httpx.Timeout(30.0, read=300.0)) as response:
+            response.raise_for_status()
+            total_bytes = int(response.headers.get("content-length") or 0)
+            downloaded_bytes = 0
+            async with aiofiles.open(dest_path, "wb") as f:
+                async for chunk in response.aiter_bytes(1024 * 256):
+                    if not chunk:
+                        continue
+                    downloaded_bytes += len(chunk)
+                    await f.write(chunk)
+                    percent = round((downloaded_bytes / total_bytes) * 100.0, 3) if total_bytes > 0 else 0.0
+                    await progress_callback(percent, downloaded_bytes, total_bytes, phase="downloading")
+            
+            if total_bytes > 0 and downloaded_bytes < total_bytes:
+                raise RuntimeError(f"Download incomplete: got {downloaded_bytes} of {total_bytes} bytes")
+                
+    return dest_path if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0 else None
+
 async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progress_callback, cover_url=None, source_url=None):
     total_frags = 0
     task_work_dir = prepare_task_work_dir(task_id)
@@ -390,6 +412,12 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
         source = await download_direct_urls(urls, temp_dir, task_id, progress_callback)
         if not source: return None
         source_ext = ".mp3"
+    elif m3u8_url.startswith("DIRECT_ZIP:"):
+        zip_url = m3u8_url.replace("DIRECT_ZIP:", "", 1).strip()
+        source = await download_single_file(zip_url, os.path.join(task_work_dir, f"dl_{task_id}.zip"), progress_callback)
+        if not source:
+            return None
+        source_ext = ".zip"
     else:
         # СТАНДАРТНАЯ ЗАГРУЗКА ЧЕРЕЗ YT-DLP API
         temp_base = os.path.join(task_work_dir, f"dl_{task_id}")
@@ -462,6 +490,7 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                 'quiet': True,
                 'no_warnings': True,
                 'noprogress': True,
+                'cachedir': False,
                 'progress_hooks': [progress_hook],
             }
             
@@ -511,14 +540,17 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
         if source:
             final_file = ""
             final_source_path = ""
+            assembled_with_progress = False
             if mode == "zip" and chapters:
                 await report_assembly_progress(0.0, 0, len(chapters))
                 final_source_path = await split_to_chapters(source, chapters, title_base, task_id, task_work_dir, source_ext, report_assembly_progress)
                 final_file = f"{title_base}.zip"
+                assembled_with_progress = True
             elif mode == "m4b" and chapters:
                 await report_assembly_progress(0.0, 0, 100)
                 final_source_path = await create_m4b_with_chapters(source, chapters, title_base, task_id, task_work_dir, cover_path, lambda pct: report_assembly_progress(pct, round(pct), 100))
                 final_file = f"{title_base}.m4b"
+                assembled_with_progress = True
             else:
                 final_file = f"{title_base}{source_ext}"
                 final_source_path = source
@@ -526,9 +558,33 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
             if not final_source_path or not os.path.exists(final_source_path):
                 return None
 
-            moved_final_path = move_to_library(final_source_path, final_file)
+            # Валидация ZIP-файла перед переносом в библиотеку
+            if final_file.lower().endswith(".zip"):
+                def validate_zip(path):
+                    import zipfile
+                    if not zipfile.is_zipfile(path):
+                        raise RuntimeError("Downloaded ZIP file is corrupted or not a valid archive")
+                    try:
+                        with zipfile.ZipFile(path) as zf:
+                            if zf.testzip() is not None:
+                                raise RuntimeError("Downloaded ZIP file contains broken files")
+                    except Exception as e:
+                        if isinstance(e, RuntimeError):
+                            raise
+                        raise RuntimeError(f"ZIP validation failed: {e}")
+                await asyncio.to_thread(validate_zip, final_source_path)
+
+            post_steps_total = 2 + (1 if cover_path and os.path.exists(cover_path) else 0)
+            post_steps_done = 0
+            if not assembled_with_progress:
+                await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
+
+            moved_final_path = await asyncio.to_thread(move_to_library, final_source_path, final_file)
             if not moved_final_path:
                 return None
+            post_steps_done += 1
+            if not assembled_with_progress:
+                await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
             if os.path.exists(source) and os.path.abspath(source) != os.path.abspath(final_source_path):
                 os.remove(source)
 
@@ -536,9 +592,10 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
             try:
                 import json
                 staged_meta_json_path = os.path.join(task_work_dir, f"{title_base}.json")
+                effective_mode = "zip" if source_ext == ".zip" or final_file.lower().endswith(".zip") else mode
                 meta_data = {
                     "title": title_base,
-                    "mode": mode,
+                    "mode": effective_mode,
                     "file_name": final_file,
                     "chapters": chapters,
                     "source_url": source_url,
@@ -547,12 +604,18 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                 }
                 async with aiofiles.open(staged_meta_json_path, "w", encoding="utf-8") as f:
                     await f.write(json.dumps(meta_data, ensure_ascii=False, indent=2))
-                move_to_library(staged_meta_json_path, f"{title_base}.json")
+                await asyncio.to_thread(move_to_library, staged_meta_json_path, f"{title_base}.json")
             except Exception as meta_e:
                 log_debug(f"Failed to write metadata JSON: {meta_e}")
+            post_steps_done += 1
+            if not assembled_with_progress:
+                await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
 
             if cover_path and os.path.exists(cover_path):
-                move_to_library(cover_path, os.path.basename(cover_path))
+                await asyncio.to_thread(move_to_library, cover_path, os.path.basename(cover_path))
+                post_steps_done += 1
+                if not assembled_with_progress:
+                    await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
 
             shutil.rmtree(task_work_dir, ignore_errors=True)
 
@@ -560,4 +623,6 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
         return None
     except Exception as e:
         log_debug(f"Final assembly error: {e}")
+        if isinstance(e, RuntimeError):
+            raise
         return None
