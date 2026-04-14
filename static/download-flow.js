@@ -167,8 +167,8 @@ async function fetchInfo() {
             headers: {'Content-Type':'application/json'},
             body: JSON.stringify({url})
         });
-        if (!res.ok) throw new Error('Book info fetch failed');
         const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Book info fetch failed');
         appState.previewLoading = false;
         if (data.chapters && data.chapters.length > 0) {
             chaptersList.innerHTML = data.chapters.map((c, i) => `
@@ -296,6 +296,14 @@ function poll(id) {
         eventSource.close();
         if (activeProgressEventSource === eventSource) {
             activeProgressEventSource = null;
+        }
+        const task = appState.activeDownloadTask;
+        if (task && task.id === id && !['success', 'error', 'not_found'].includes(task.status)) {
+            window.setTimeout(() => {
+                if (appState.activeDownloadTask?.id === id && !activeProgressEventSource) {
+                    poll(id);
+                }
+            }, 1000);
         }
     };
 }

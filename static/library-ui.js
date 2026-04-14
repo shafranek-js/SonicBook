@@ -452,7 +452,16 @@ async function loadGoogleDriveLibrary(forceRefresh = false) {
         syncLibraryPlayIcons();
     } catch (e) {
         setLibraryCount(0);
-        listDiv.innerHTML = renderPanelEmptyState('!', t.googleDriveLibraryError, t.googleDriveLibraryErrorHint, 'error');
+        const detail = String(e.message || '').trim();
+        listDiv.innerHTML = renderPanelEmptyState(
+            '!',
+            t.googleDriveLibraryError,
+            detail || t.googleDriveLibraryErrorHint,
+            'error'
+        );
+        if (detail) {
+            setStatusMessage(detail, 'error');
+        }
     } finally {
         appState.googleDrive.refreshingLibrary = false;
         syncLibrarySourceUI();

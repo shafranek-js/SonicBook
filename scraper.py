@@ -2,10 +2,12 @@ import re
 import asyncio
 import json
 import logging
+import base64
+import html
 import httpx
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
-from urllib.parse import urljoin
+from playwright.async_api import async_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
+from urllib.parse import urljoin, urlparse, parse_qs, unquote
 import config
 from processor import sanitize_filename
 
@@ -17,22 +19,56 @@ def log_debug(message):
 # Persistent Playwright browser instance
 playwright_instance = None
 browser_instance = None
+browser_start_error = ""
+
+
+def describe_playwright_issue(exc: Exception) -> str:
+    message = str(exc or "").strip()
+    lowered = message.lower()
+    winerror = getattr(exc, "winerror", None)
+
+    if isinstance(exc, PermissionError) or winerror == 5 or "access is denied" in lowered:
+        return (
+            "Playwright Chromium launch was blocked by Windows permissions or antivirus. "
+            "Try running SonicBook once as administrator, add the Playwright browser folder to antivirus exclusions, "
+            "and verify Chromium is installed with 'playwright install chromium'."
+        )
+    if "executable doesn't exist" in lowered or "browserType.launch" in lowered and "executable" in lowered:
+        return "Playwright Chromium is not installed. Run 'playwright install chromium' and try again."
+    if "target page, context or browser has been closed" in lowered:
+        return "Playwright browser closed unexpectedly while scraping the page."
+    if isinstance(exc, PlaywrightTimeoutError) or "timeout" in lowered:
+        return "Playwright timed out while opening the page."
+    return f"Playwright browser error: {message or exc.__class__.__name__}"
 
 async def init_browser():
-    global playwright_instance, browser_instance
+    global playwright_instance, browser_instance, browser_start_error
     if not playwright_instance:
         log_debug("Initializing persistent Playwright browser...")
-        playwright_instance = await async_playwright().start()
-        browser_instance = await playwright_instance.chromium.launch(headless=True)
+        try:
+            playwright_instance = await async_playwright().start()
+            browser_instance = await playwright_instance.chromium.launch(headless=True)
+            browser_start_error = ""
+        except Exception as e:
+            browser_start_error = describe_playwright_issue(e)
+            logger.exception("Persistent Playwright browser initialization failed: %s", browser_start_error)
+            if playwright_instance:
+                try:
+                    await playwright_instance.stop()
+                except Exception:
+                    pass
+            playwright_instance = None
+            browser_instance = None
 
 async def close_browser():
-    global playwright_instance, browser_instance
+    global playwright_instance, browser_instance, browser_start_error
     if browser_instance:
         await browser_instance.close()
     if playwright_instance:
         await playwright_instance.stop()
     playwright_instance = None
     browser_instance = None
+    browser_start_error = ""
 
 def parse_time_to_seconds(time_str):
     try:
@@ -116,9 +152,37 @@ def extract_chapters_from_html(html_content):
         current_start += dur_sec
     return chapters
 
+
+def extract_audioboo_zip_url(html_content: str, page_url: str) -> str | None:
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    for anchor in soup.find_all("a", href=True):
+        href = anchor.get("href", "").strip()
+        if "engine/go.php?url=" not in href:
+            continue
+
+        absolute = urljoin(page_url, href)
+        parsed = urlparse(absolute)
+        encoded = (parse_qs(parsed.query).get("url") or [""])[0].strip()
+        if not encoded:
+            continue
+
+        try:
+            raw = unquote(encoded)
+            padded = raw + ("=" * (-len(raw) % 4))
+            decoded = base64.b64decode(padded).decode("utf-8", errors="replace")
+            normalized = html.unescape(decoded).strip()
+            if normalized.startswith("http://") or normalized.startswith("https://"):
+                return normalized
+        except Exception:
+            continue
+
+    return None
+
 async def get_book_info(book_url):
     log_debug(f"Combined info scraping: {book_url}")
     res = {"m3u8": None, "title": "audiobook", "chapters": [], "cover": None}
+    playwright_failure = ""
 
     # 0. МАРШРУТИЗАТОР: Обработка специфичных сайтов (например, knigavuhe.org)
     if "knigavuhe.org" in book_url:
@@ -158,6 +222,32 @@ async def get_book_info(book_url):
                         return res["m3u8"], res["title"], res["chapters"], res["cover"]
         except Exception as e:
             log_debug(f"Knigavuhe parse error: {e}")
+            return None, "audiobook", [], None
+
+    if "audioboo.org" in book_url:
+        log_debug("Detected audioboo.org, using ZIP parser...")
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            }
+            async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+                resp = await client.get(book_url, headers=headers, timeout=30)
+                if resp.status_code == 200:
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    h1 = soup.find("h1")
+                    if h1:
+                        res["title"] = h1.get_text(" ", strip=True)
+
+                    res["cover"] = extract_cover_url(soup, book_url)
+                    zip_url = extract_audioboo_zip_url(resp.text, str(resp.url))
+                    if zip_url:
+                        log_debug(f"Audioboo: Found direct ZIP URL {zip_url}")
+                        res["m3u8"] = f"DIRECT_ZIP:{zip_url}"
+                        return res["m3u8"], res["title"], [], res["cover"]
+        except Exception as e:
+            log_debug(f"Audioboo parse error: {e}")
             return None, "audiobook", [], None
 
     # Text-based parsing (Fast) для остальных сайтов
@@ -262,11 +352,13 @@ async def get_book_info(book_url):
                 }""")
                 log_debug(f"DOM parsing found {len(res['chapters'])} chapters")
             
-            if not res["chapters"] and res["title"] != "audiobook":
-                res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
+                if not res["chapters"] and res["title"] != "audiobook":
+                    res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
 
-            await context.close()
+                await context.close()
         else:
+            if browser_start_error:
+                log_debug(f"Persistent Playwright unavailable: {browser_start_error}")
             log_debug("Persistent browser not found, launching temporary instance...")
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
@@ -351,6 +443,11 @@ async def get_book_info(book_url):
                     res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
 
                 await browser.close()
-    except Exception as e: log_debug(f"Playwright error: {e}")
+    except Exception as e:
+        playwright_failure = describe_playwright_issue(e)
+        logger.exception("Playwright scraping failed: %s", playwright_failure)
+
+    if not res["m3u8"] and playwright_failure:
+        raise RuntimeError(playwright_failure)
 
     return res["m3u8"], res["title"], res["chapters"], res["cover"]

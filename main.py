@@ -362,9 +362,6 @@ async def google_drive_library(folder_id: str = "", refresh: bool = False):
         files = await google_drive_service.list_google_drive_library_files_cached(folder_id, force_refresh=refresh)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except httpx.HTTPStatusError as exc:
-        logger.exception("Google Drive library request failed")
-        raise HTTPException(status_code=502, detail="Google Drive API request failed") from exc
     return {"files": files}
 
 
@@ -384,9 +381,6 @@ async def google_drive_import(request: GoogleDriveImportRequest):
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except httpx.HTTPStatusError as exc:
-        logger.exception("Google Drive import failed")
-        raise HTTPException(status_code=502, detail="Google Drive file download failed") from exc
     return {"status": "success", **result}
 
 
@@ -412,9 +406,6 @@ async def google_drive_metadata(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except httpx.HTTPStatusError as exc:
-        logger.exception("Google Drive metadata request failed")
-        raise HTTPException(status_code=502, detail="Google Drive metadata request failed") from exc
 
 
 @app.get("/api/google-drive/files/{file_id}/probe")
@@ -438,9 +429,6 @@ async def google_drive_stream_file(file_id: str, request: Request, resource_key:
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except httpx.HTTPStatusError as exc:
-        logger.exception("Google Drive stream request failed")
-        raise HTTPException(status_code=502, detail="Google Drive file stream failed") from exc
 
     async def stream_generator():
         try:
@@ -460,7 +448,10 @@ async def google_drive_stream_file(file_id: str, request: Request, resource_key:
 @app.post("/api/info")
 async def get_info(request: InfoRequest):
     book_url = validate_book_url(request.url)
-    m3u8, title, chapters, cover = await scraper.get_book_info(book_url)
+    try:
+        m3u8, title, chapters, cover = await scraper.get_book_info(book_url)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
     if not m3u8:
         raise HTTPException(status_code=404, detail="Audio stream not found")
     return {"title": title, "chapters": chapters, "cover": cover}
@@ -482,7 +473,7 @@ async def process_book(task_id, url, mode):
         # 1. Get info again (or cache it)
         m3u8, title, chapters, cover = await scraper.get_book_info(url)
         if not m3u8:
-            progress_service.update_progress_entry(task_id, status="error")
+            progress_service.update_progress_entry(task_id, status="error", message="Audio stream not found")
             return
 
         progress_service.update_progress_entry(task_id, status="processing", phase="downloading", percent=0.0)
@@ -513,9 +504,12 @@ async def process_book(task_id, url, mode):
             )
         else:
             progress_service.update_progress_entry(task_id, status="error")
+    except RuntimeError as exc:
+        logger.exception("Background task failed for %s", task_id)
+        progress_service.update_progress_entry(task_id, status="error", message=str(exc))
     except Exception:
         logger.exception("Background task failed for %s", task_id)
-        progress_service.update_progress_entry(task_id, status="error")
+        progress_service.update_progress_entry(task_id, status="error", message="Background task failed")
 
 @app.get("/api/progress/{task_id}")
 async def get_progress(task_id: str):
@@ -524,27 +518,27 @@ async def get_progress(task_id: str):
 @app.get("/api/progress/stream/{task_id}")
 async def progress_stream(task_id: str, request: Request):
     async def event_generator():
-        last_percent = -1
-        last_status = None
-        while True:
-            if await request.is_disconnected():
-                break
-                
-            data = progress_service.get_progress(task_id)
-            
-            # Only send update if something changed
-            if data.get("percent") != last_percent or data.get("status") != last_status:
-                last_percent = data.get("percent", -1)
-                last_status = data.get("status")
-                import json
-                yield f"data: {json.dumps(data)}\n\n"
-            
-            if data.get("status") in ["success", "error", "not_found"]:
-                # Send one final update just to be sure, then stop stream
-                yield f"data: {json.dumps(data)}\n\n"
-                break
-                
-            await asyncio.sleep(0.5)
+        last_payload = None
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                data = progress_service.get_progress(task_id)
+                payload = json.dumps(data, ensure_ascii=False, sort_keys=True)
+
+                if payload != last_payload:
+                    last_payload = payload
+                    yield f"data: {payload}\n\n"
+
+                if data.get("status") in ["success", "error", "not_found"]:
+                    break
+
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            logger.debug("SSE progress stream cancelled for task %s", task_id)
+        except (ConnectionResetError, BrokenPipeError, RuntimeError):
+            logger.debug("SSE progress stream disconnected for task %s", task_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
