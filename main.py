@@ -223,6 +223,10 @@ async def cleanup_task():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import shutil
+    shutil.rmtree(config.WORK_DIR, ignore_errors=True)
+    config.ensure_runtime_directories()
+    
     config.ensure_ffmpeg_binaries()
     loop = asyncio.get_running_loop()
     previous_exception_handler = install_asyncio_exception_filter()
@@ -276,18 +280,26 @@ async def save_playback_profile(request: PlaybackProfileRequest):
 
 @app.post("/api/settings/choose_folder")
 async def choose_folder():
-    def open_dialog():
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.withdraw()
-        root.wm_attributes('-topmost', 1)
-        folder = filedialog.askdirectory(initialdir=config.DOWNLOADS_DIR, title="Select Download Folder")
-        root.destroy()
-        return folder
-
-    loop = asyncio.get_running_loop()
-    selected = await loop.run_in_executor(None, open_dialog)
+    import sys
+    script = """
+import sys
+import tkinter as tk
+from tkinter import filedialog
+root = tk.Tk()
+root.withdraw()
+root.wm_attributes('-topmost', 1)
+folder = filedialog.askdirectory(initialdir=sys.argv[1], title="Select Download Folder")
+root.destroy()
+if folder:
+    sys.stdout.write(folder)
+"""
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", script, config.DOWNLOADS_DIR,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await process.communicate()
+    selected = stdout.decode("utf-8", errors="replace").strip()
     
     if selected:
         # Use absolute path and fix slashes

@@ -274,8 +274,17 @@ async def get_book_info(book_url):
     try:
         if browser_instance:
             log_debug("Using persistent Playwright browser instance")
-            context = await browser_instance.new_context()
-            page = await context.new_page()
+            try:
+                context = await browser_instance.new_context()
+                page = await context.new_page()
+            except Exception as e:
+                log_debug(f"Persistent browser context failed, attempting respawn: {e}")
+                await close_browser()
+                await init_browser()
+                if not browser_instance:
+                    raise RuntimeError("Failed to respawn browser instance")
+                context = await browser_instance.new_context()
+                page = await context.new_page()
             
             # Блокируем только картинки и медиа для скорости (оставляем CSS, так как он может быть нужен плееру)
             await page.route("**/*.{png,jpg,jpeg,svg,woff,woff2,ico}", lambda route: route.abort())

@@ -481,11 +481,11 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
                                 current_loop
                             )
                         except Exception as e:
-                            pass
+                            log_debug(f"Failed to send progress: {e}")
 
             ydl_opts = {
                 'outtmpl': f"{temp_base}.%(ext)s",
-                'concurrent_fragment_downloads': 16,
+                'concurrent_fragment_downloads': config.YTDLP_CONCURRENCY,
                 'ffmpeg_location': config.FFMPEG_PATH,
                 'quiet': True,
                 'no_warnings': True,
