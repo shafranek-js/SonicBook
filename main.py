@@ -97,11 +97,11 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | N
 
 
 async def iter_file_range(file_path: str, start: int, end: int):
-    with open(file_path, "rb") as f:
-        f.seek(start)
+    async with aiofiles.open(file_path, "rb") as f:
+        await f.seek(start)
         remaining = end - start + 1
         while remaining > 0:
-            chunk = f.read(min(STREAM_CHUNK_SIZE, remaining))
+            chunk = await f.read(min(STREAM_CHUNK_SIZE, remaining))
             if not chunk:
                 break
             remaining -= len(chunk)
