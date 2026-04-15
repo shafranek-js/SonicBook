@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import aiofiles
 import httpx
 
 import bookmark_service
@@ -578,8 +579,8 @@ async def _download_drive_file_to_path(client: httpx.AsyncClient, file_id: str, 
         params={"alt": "media", "supportsAllDrives": "true"},
     )
     response.raise_for_status()
-    with open(destination_path, "wb") as f:
-        f.write(response.content)
+    async with aiofiles.open(destination_path, "wb") as f:
+        await f.write(response.content)
     return destination_path
 
 
