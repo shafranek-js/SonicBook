@@ -122,7 +122,6 @@ def extract_chapters_from_html(html_content):
                     j += 1; continue
                 if re.match(r"^(?:\d{2}:)?\d{2}:\d{2}$", candidate): break
                 title = candidate.strip()
-                # ФИЛЬТРАЦИЯ: пропускаем строки, состоящие только из знаков препинания
                 if title and not re.match(r"^[/\s\-\.,_]+$", title):
                     tracks.append({"duration": duration, "title": title})
                     i = j; break
@@ -137,7 +136,6 @@ def extract_chapters_from_html(html_content):
                     j += 1; continue
                 if re.match(r"^(?:\d{2}:)?\d{2}:\d{2}$", candidate) or candidate.isdigit(): break
                 title = candidate.strip()
-                # ФИЛЬТРАЦИЯ: пропускаем мусорные строки
                 if title and not re.match(r"^[/\s\-\.,_]+$", title):
                     tracks.append({"duration": duration, "title": title})
                     i = j; break
@@ -151,7 +149,6 @@ def extract_chapters_from_html(html_content):
         chapters.append({"title": t["title"], "start": current_start, "end": current_start + dur_sec})
         current_start += dur_sec
     return chapters
-
 
 def extract_audioboo_zip_url(html_content: str, page_url: str) -> str | None:
     soup = BeautifulSoup(html_content, "html.parser")
@@ -179,56 +176,191 @@ def extract_audioboo_zip_url(html_content: str, page_url: str) -> str | None:
 
     return None
 
+async def _parse_knigavuhe(book_url):
+    log_debug("Detected knigavuhe.org, using dedicated fast parser...")
+    res = {"m3u8": None, "title": "audiobook", "chapters": [], "cover": None}
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        async with httpx.AsyncClient(http2=True) as client:
+            resp = await client.get(book_url, headers=headers, timeout=20, follow_redirects=True)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                h1 = soup.find("h1")
+                if h1: res["title"] = sanitize_filename(h1.get_text().strip())
+
+                res["cover"] = extract_cover_url(soup, book_url)
+
+                match = re.search(r'\[\{.*?"title".*?"url".*?\}\]', resp.text)
+                if match:
+                    data = json.loads(match.group(0))
+                    direct_urls = []
+                    current_start = 0
+                    for item in data:
+                        title = item.get("title", "")
+                        url = item.get("url", "")
+                        dur = item.get("duration", 0)
+                        if url:
+                            direct_urls.append(url)
+                            res["chapters"].append({
+                                "title": title,
+                                "start": current_start,
+                                "end": current_start + dur
+                            })
+                            current_start += dur
+                    log_debug(f"Knigavuhe: Found {len(direct_urls)} tracks")
+                    res["m3u8"] = "DIRECT_URLS:" + ",".join(direct_urls)
+                    return res["m3u8"], res["title"], res["chapters"], res["cover"]
+    except Exception as e:
+        log_debug(f"Knigavuhe parse error: {e}")
+    return None, "audiobook", [], None
+
+async def _parse_text_based(book_url, res):
+    """Text-based parsing (Fast) для остальных сайтов."""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": "https://akniga.org/"
+        }
+        async with httpx.AsyncClient(http2=True) as client:
+            resp = await client.get(book_url, headers=headers, timeout=20, follow_redirects=True)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                h1 = soup.find("h1")
+                if h1: res["title"] = h1.get_text().strip()
+                
+                res["cover"] = extract_cover_url(soup, book_url)
+                    
+                res["chapters"] = extract_chapters_from_html(resp.text)
+    except Exception as e:
+        log_debug(f"BS4 parse error: {e}")
+
+async def _extract_playwright_data(page, res, book_url):
+    """Core logic to interact with the page and extract m3u8 and chapters."""
+    await page.route("**/*.{png,jpg,jpeg,svg,woff,woff2,ico}", lambda route: route.abort())
+    page.on("request", lambda r: res.update({"m3u8": r.url}) if ".m3u8" in r.url else None)
+
+    await page.goto(book_url, wait_until="domcontentloaded", timeout=30000)
+
+    for _ in range(15):
+        if res["m3u8"]: break
+        if _ == 5:
+            try:
+                await page.evaluate("document.querySelector('.button__player--play, .js-player-play')?.click()")
+                log_debug("Play clicked via JS")
+            except: pass
+        await asyncio.sleep(1)
+
+    if not res["chapters"]:
+        log_debug("BS4 chapters empty, parsing DOM elements...")
+        res["chapters"] = await page.evaluate("""() => {
+            let items = [];
+
+            let standardItems = document.querySelectorAll('.ls-item');
+            if (standardItems.length > 0) {
+                standardItems.forEach(el => {
+                    let titleEl = el.querySelector('.ls-title');
+                    if (titleEl) {
+                        items.push({
+                            title: titleEl.innerText.trim(),
+                            start: parseFloat(el.getAttribute('data-time') || 0),
+                            end: 0
+                        });
+                    }
+                });
+            }
+
+            if (items.length === 0) {
+                let oldItems = document.querySelectorAll('.chapter__default');
+                if (oldItems.length > 0) {
+                    oldItems.forEach(el => {
+                        let titleEl = el.querySelector('.chapter__default--title');
+                        let pos = el.getAttribute('data-pos');
+                        if (titleEl && pos !== null) {
+                            items.push({
+                                title: titleEl.innerText.trim(),
+                                start: parseFloat(pos),
+                                end: 0
+                            });
+                        }
+                    });
+                }
+            }
+
+            for (let i = 0; i < items.length; i++) {
+                if (i < items.length - 1) {
+                    items[i].end = items[i+1].start;
+                }
+            }
+
+            let jsData = window.items || window.playlist || window.free_playlist;
+            if (jsData && Array.isArray(jsData) && jsData.length > 0) {
+                return jsData.map(i => ({
+                    title: i.title || i.name || "Chapter",
+                    start: parseFloat(i.time_from_start || i.start || 0),
+                    end: parseFloat(i.time_finish || i.end || 0)
+                }));
+            }
+            
+            return items;
+        }""")
+        log_debug(f"DOM parsing found {len(res['chapters'])} chapters")
+
+    if not res["chapters"] and res["title"] != "audiobook":
+        res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
+
+async def _parse_browser_based(book_url, res):
+    """Browser-based parsing (for m3u8) using either persistent or temp Playwright instance."""
+    playwright_failure = ""
+    try:
+        if browser_instance:
+            log_debug("Using persistent Playwright browser instance")
+            try:
+                context = await browser_instance.new_context()
+                page = await context.new_page()
+            except Exception as e:
+                log_debug(f"Persistent browser context failed, attempting respawn: {e}")
+                await close_browser()
+                await init_browser()
+                if not browser_instance:
+                    raise RuntimeError("Failed to respawn browser instance")
+                context = await browser_instance.new_context()
+                page = await context.new_page()
+
+            await _extract_playwright_data(page, res, book_url)
+
+            await context.close()
+        else:
+            if browser_start_error:
+                log_debug(f"Persistent Playwright unavailable: {browser_start_error}")
+            log_debug("Persistent browser not found, launching temporary instance...")
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                
+                await _extract_playwright_data(page, res, book_url)
+
+                await browser.close()
+    except Exception as e:
+        playwright_failure = describe_playwright_issue(e)
+        logger.exception("Playwright scraping failed: %s", playwright_failure)
+
+    return playwright_failure
+
 async def get_book_info(book_url):
     log_debug(f"Combined info scraping: {book_url}")
     res = {"m3u8": None, "title": "audiobook", "chapters": [], "cover": None}
     playwright_failure = ""
 
-    # 0. МАРШРУТИЗАТОР: Обработка специфичных сайтов (например, knigavuhe.org)
     if "knigavuhe.org" in book_url:
-        log_debug("Detected knigavuhe.org, using dedicated fast parser...")
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            async with httpx.AsyncClient(http2=True) as client:
-                resp = await client.get(book_url, headers=headers, timeout=20, follow_redirects=True)
-                if resp.status_code == 200:
-                    soup = BeautifulSoup(resp.text, "html.parser")
-                    h1 = soup.find("h1")
-                    if h1: res["title"] = sanitize_filename(h1.get_text().strip())
-
-                    res["cover"] = extract_cover_url(soup, book_url)
-
-                    # Ищем JSON со списком треков
-                    match = re.search(r'\[\{.*?"title".*?"url".*?\}\]', resp.text)
-                    if match:
-                        data = json.loads(match.group(0))
-                        direct_urls = []
-                        current_start = 0
-                        for item in data:
-                            title = item.get("title", "")
-                            url = item.get("url", "")
-                            dur = item.get("duration", 0)
-                            if url:
-                                direct_urls.append(url)
-                                res["chapters"].append({
-                                    "title": title,
-                                    "start": current_start,
-                                    "end": current_start + dur
-                                })
-                                current_start += dur
-                        log_debug(f"Knigavuhe: Found {len(direct_urls)} tracks")
-                        # Передаем список URL как строку, разделенную запятыми, с префиксом
-                        res["m3u8"] = "DIRECT_URLS:" + ",".join(direct_urls)
-                        return res["m3u8"], res["title"], res["chapters"], res["cover"]
-        except Exception as e:
-            log_debug(f"Knigavuhe parse error: {e}")
-            return None, "audiobook", [], None
+        return await _parse_knigavuhe(book_url)
 
     if "audioboo.org" in book_url:
         log_debug("Detected audioboo.org, using ZIP parser...")
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "User-Agent": "Mozilla/5.0",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                 "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
             }
@@ -250,211 +382,9 @@ async def get_book_info(book_url):
             log_debug(f"Audioboo parse error: {e}")
             return None, "audiobook", [], None
 
-    # Text-based parsing (Fast) для остальных сайтов
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Referer": "https://akniga.org/"
-        }
-        async with httpx.AsyncClient(http2=True) as client:
-            resp = await client.get(book_url, headers=headers, timeout=20, follow_redirects=True)
-            if resp.status_code == 200:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                h1 = soup.find("h1")
-                if h1: res["title"] = h1.get_text().strip()
-                
-                res["cover"] = extract_cover_url(soup, book_url)
-                    
-                res["chapters"] = extract_chapters_from_html(resp.text)
-    except Exception as e: log_debug(f"BS4 parse error: {e}")
-
-    # Browser-based parsing (for m3u8)
-    try:
-        if browser_instance:
-            log_debug("Using persistent Playwright browser instance")
-            try:
-                context = await browser_instance.new_context()
-                page = await context.new_page()
-            except Exception as e:
-                log_debug(f"Persistent browser context failed, attempting respawn: {e}")
-                await close_browser()
-                await init_browser()
-                if not browser_instance:
-                    raise RuntimeError("Failed to respawn browser instance")
-                context = await browser_instance.new_context()
-                page = await context.new_page()
-            
-            # Блокируем только картинки и медиа для скорости (оставляем CSS, так как он может быть нужен плееру)
-            await page.route("**/*.{png,jpg,jpeg,svg,woff,woff2,ico}", lambda route: route.abort())
-            page.on("request", lambda r: res.update({"m3u8": r.url}) if ".m3u8" in r.url else None)
-            
-            await page.goto(book_url, wait_until="domcontentloaded", timeout=30000)
-            
-            for _ in range(15):
-                if res["m3u8"]: break
-                if _ == 5:
-                    try:
-                        # Агрессивный клик через JS работает надежнее
-                        await page.evaluate("document.querySelector('.button__player--play, .js-player-play')?.click()")
-                        log_debug("Play clicked via JS")
-                    except: pass
-                await asyncio.sleep(1)
-
-            if not res["chapters"]:
-                log_debug("BS4 chapters empty, parsing DOM elements...")
-                res["chapters"] = await page.evaluate("""() => {
-                    let items = [];
-                    
-                    // 1. Try standard akniga layout (.ls-item)
-                    let standardItems = document.querySelectorAll('.ls-item');
-                    if (standardItems.length > 0) {
-                        standardItems.forEach(el => {
-                            let titleEl = el.querySelector('.ls-title');
-                            if (titleEl) {
-                                items.push({
-                                    title: titleEl.innerText.trim(),
-                                    start: parseFloat(el.getAttribute('data-time') || 0),
-                                    end: 0
-                                });
-                            }
-                        });
-                    }
-                    
-                    // 2. Try old/alternative akniga layout (.chapter__default)
-                    if (items.length === 0) {
-                        let oldItems = document.querySelectorAll('.chapter__default');
-                        if (oldItems.length > 0) {
-                            oldItems.forEach(el => {
-                                let titleEl = el.querySelector('.chapter__default--title');
-                                let pos = el.getAttribute('data-pos');
-                                if (titleEl && pos !== null) {
-                                    items.push({
-                                        title: titleEl.innerText.trim(),
-                                        start: parseFloat(pos),
-                                        end: 0
-                                    });
-                                }
-                            });
-                        }
-                    }
-
-                    // 3. Post-process to set 'end' times
-                    for (let i = 0; i < items.length; i++) {
-                        if (i < items.length - 1) {
-                            items[i].end = items[i+1].start;
-                        }
-                    }
-
-                    // 4. Try Global JS Variables (highest priority if found)
-                    let jsData = window.items || window.playlist || window.free_playlist;
-                    if (jsData && Array.isArray(jsData) && jsData.length > 0) {
-                        return jsData.map(i => ({
-                            title: i.title || i.name || "Chapter", 
-                            start: parseFloat(i.time_from_start || i.start || 0), 
-                            end: parseFloat(i.time_finish || i.end || 0)
-                        }));
-                    }
-                    
-                    return items;
-                }""")
-                log_debug(f"DOM parsing found {len(res['chapters'])} chapters")
-            
-                if not res["chapters"] and res["title"] != "audiobook":
-                    res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
-
-                await context.close()
-        else:
-            if browser_start_error:
-                log_debug(f"Persistent Playwright unavailable: {browser_start_error}")
-            log_debug("Persistent browser not found, launching temporary instance...")
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
-                
-                # Блокируем только картинки и медиа для скорости (оставляем CSS, так как он может быть нужен плееру)
-                await page.route("**/*.{png,jpg,jpeg,svg,woff,woff2,ico}", lambda route: route.abort())
-                page.on("request", lambda r: res.update({"m3u8": r.url}) if ".m3u8" in r.url else None)
-                
-                await page.goto(book_url, wait_until="domcontentloaded", timeout=30000)
-                
-                for _ in range(15):
-                    if res["m3u8"]: break
-                    if _ == 5:
-                        try:
-                            # Агрессивный клик через JS работает надежнее
-                            await page.evaluate("document.querySelector('.button__player--play, .js-player-play')?.click()")
-                            log_debug("Play clicked via JS")
-                        except: pass
-                    await asyncio.sleep(1)
-
-                if not res["chapters"]:
-                    log_debug("BS4 chapters empty, parsing DOM elements...")
-                    res["chapters"] = await page.evaluate("""() => {
-                        let items = [];
-                        
-                        // 1. Try standard akniga layout (.ls-item)
-                        let standardItems = document.querySelectorAll('.ls-item');
-                        if (standardItems.length > 0) {
-                            standardItems.forEach(el => {
-                                let titleEl = el.querySelector('.ls-title');
-                                if (titleEl) {
-                                    items.push({
-                                        title: titleEl.innerText.trim(),
-                                        start: parseFloat(el.getAttribute('data-time') || 0),
-                                        end: 0
-                                    });
-                                }
-                            });
-                        }
-                        
-                        // 2. Try old/alternative akniga layout (.chapter__default)
-                        if (items.length === 0) {
-                            let oldItems = document.querySelectorAll('.chapter__default');
-                            if (oldItems.length > 0) {
-                                oldItems.forEach(el => {
-                                    let titleEl = el.querySelector('.chapter__default--title');
-                                    let pos = el.getAttribute('data-pos');
-                                    if (titleEl && pos !== null) {
-                                        items.push({
-                                            title: titleEl.innerText.trim(),
-                                            start: parseFloat(pos),
-                                            end: 0
-                                        });
-                                    }
-                                });
-                            }
-                        }
-
-                        // 3. Post-process to set 'end' times
-                        for (let i = 0; i < items.length; i++) {
-                            if (i < items.length - 1) {
-                                items[i].end = items[i+1].start;
-                            }
-                        }
-
-                        // 4. Try Global JS Variables (highest priority if found)
-                        let jsData = window.items || window.playlist || window.free_playlist;
-                        if (jsData && Array.isArray(jsData) && jsData.length > 0) {
-                            return jsData.map(i => ({
-                                title: i.title || i.name || "Chapter", 
-                                start: parseFloat(i.time_from_start || i.start || 0), 
-                                end: parseFloat(i.time_finish || i.end || 0)
-                            }));
-                        }
-                        
-                        return items;
-                    }""")
-                    log_debug(f"DOM parsing found {len(res['chapters'])} chapters")
-                
-                if not res["chapters"] and res["title"] != "audiobook":
-                    res["chapters"] = [{"title": res["title"], "start": 0, "end": 0}]
-
-                await browser.close()
-    except Exception as e:
-        playwright_failure = describe_playwright_issue(e)
-        logger.exception("Playwright scraping failed: %s", playwright_failure)
+    await _parse_text_based(book_url, res)
+    
+    playwright_failure = await _parse_browser_based(book_url, res)
 
     if not res["m3u8"] and playwright_failure:
         raise RuntimeError(playwright_failure)
