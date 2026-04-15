@@ -604,13 +604,13 @@ async def get_imported_book_ids():
 @app.get("/api/files/{file_name:path}")
 async def download_file(file_name: str, request: Request):
     file_path = resolve_download_path(file_name)
-    if os.path.exists(file_path):
+    if await asyncio.to_thread(os.path.exists, file_path):
         media_type = guess_media_type(file_path)
         common_headers = {
             "accept-ranges": "bytes",
             "content-disposition": build_inline_content_disposition(file_path),
         }
-        file_size = os.path.getsize(file_path)
+        file_size = await asyncio.to_thread(os.path.getsize, file_path)
         range_header = request.headers.get("range", "")
         byte_range = parse_range_header(range_header, file_size) if range_header else None
         if byte_range is not None:
@@ -647,17 +647,20 @@ async def get_metadata(file_name: str):
     if file_name.endswith('.zip'):
         payload = await zip_service.build_zip_metadata(file_path, file_name, config.DOWNLOADS_DIR)
         if isinstance(payload, dict):
-            payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=os.path.getsize(file_path), metadata=payload)
+            size_bytes = await asyncio.to_thread(os.path.getsize, file_path)
+            payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=size_bytes, metadata=payload)
         return payload
 
     # Handle standard M4B/MP3 with JSON metadata
     json_path = os.path.join(os.path.dirname(file_path), f"{base_name}.json")
-    if os.path.exists(json_path):
+    if await asyncio.to_thread(os.path.exists, json_path):
         try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
+            async with aiofiles.open(json_path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                payload = json.loads(content)
             if isinstance(payload, dict):
-                payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=os.path.getsize(file_path), metadata=payload)
+                size_bytes = await asyncio.to_thread(os.path.getsize, file_path)
+                payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=size_bytes, metadata=payload)
                 return payload
         except Exception:
             logger.exception("Failed to read metadata sidecar: %s", json_path)
