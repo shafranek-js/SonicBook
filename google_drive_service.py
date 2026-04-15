@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import aiofiles
 import httpx
 
 import bookmark_service
@@ -578,8 +579,8 @@ async def _download_drive_file_to_path(client: httpx.AsyncClient, file_id: str, 
         params={"alt": "media", "supportsAllDrives": "true"},
     )
     response.raise_for_status()
-    with open(destination_path, "wb") as f:
-        f.write(response.content)
+    async with aiofiles.open(destination_path, "wb") as f:
+        await f.write(response.content)
     return destination_path
 
 
@@ -705,9 +706,9 @@ async def _read_public_drive_json(file_id: str, resource_key: str = "") -> dict:
 async def _download_public_drive_file_to_path(file_id: str, destination_path: str, resource_key: str = "") -> str:
     client, response = await _open_public_drive_file(file_id, resource_key=resource_key, stream=True)
     try:
-        with open(destination_path, "wb") as f:
+        async with aiofiles.open(destination_path, "wb") as f:
             async for chunk in response.aiter_bytes():
-                f.write(chunk)
+                await f.write(chunk)
         return destination_path
     finally:
         await response.aclose()
