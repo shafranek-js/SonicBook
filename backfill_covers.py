@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 import httpx
 from PIL import Image
+import aiofiles
 
 import config
 import scraper
@@ -515,8 +516,8 @@ async def process_file(file_name: str, aliases: dict) -> dict:
     ext = resolve_cover_extension(best["url"], best["content_type"])
     cover_file_name = f"{base_name}{ext}"
     cover_path = os.path.join(config.DOWNLOADS_DIR, cover_file_name)
-    with open(cover_path, "wb") as f:
-        f.write(best["image_bytes"])
+    async with aiofiles.open(cover_path, "wb") as f:
+        await f.write(best["image_bytes"])
 
     metadata["title"] = metadata.get("title") or base_name
     metadata["file_name"] = metadata.get("file_name") or file_name
