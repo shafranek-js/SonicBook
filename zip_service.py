@@ -19,8 +19,16 @@ def get_zip_extraction_lock(extract_dir_name: str) -> asyncio.Lock:
 
 
 def extract_zip_archive(zip_path: str, extract_dir_path: str):
+    extract_dir_path = os.path.abspath(extract_dir_path)
     with zipfile.ZipFile(zip_path, "r") as archive:
-        archive.extractall(extract_dir_path)
+        for member in archive.infolist():
+            target_path = os.path.abspath(os.path.join(extract_dir_path, member.filename))
+            try:
+                if os.path.commonpath([extract_dir_path, target_path]) != extract_dir_path:
+                    continue
+            except ValueError:
+                continue
+            archive.extract(member, extract_dir_path)
 
 
 async def ensure_zip_extracted(zip_path: str, extract_dir_name: str, extract_dir_path: str):
