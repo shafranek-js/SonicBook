@@ -67,7 +67,7 @@ def _deep_merge(defaults, override):
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
             merged[key] = _deep_merge(merged[key], value)
         else:
-            merged[key] = value
+            merged[key] = copy.deepcopy(value)
     return merged
 
 
