@@ -1,8 +1,12 @@
 import copy
 import json
+import logging
 import os
 import shutil
 import uuid
+
+
+logger = logging.getLogger(__name__)
 
 
 # Paths
@@ -52,7 +56,7 @@ def load_dotenv_file():
                 if key and key not in os.environ:
                     os.environ[key] = value
     except Exception:
-        pass
+        logger.warning("Failed to load .env", exc_info=True)
 
 
 load_dotenv_file()
@@ -80,7 +84,7 @@ def load_settings():
                 if isinstance(loaded, dict):
                     settings = _deep_merge(DEFAULT_SETTINGS, loaded)
     except Exception:
-        pass
+        logger.exception("Failed to load settings")
     return settings
 
 
@@ -108,6 +112,7 @@ def save_settings(settings):
         os.replace(temp_settings_file, SETTINGS_FILE)
         return True
     except Exception:
+        logger.exception("Failed to save settings")
         if os.path.exists(temp_settings_file):
             try:
                 os.remove(temp_settings_file)
@@ -246,6 +251,7 @@ def save_downloads_dir(path):
             return True
         return False
     except Exception:
+        logger.exception("Failed to save downloads directory")
         return False
 
 
