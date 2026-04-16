@@ -97,15 +97,18 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | N
 
 
 async def iter_file_range(file_path: str, start: int, end: int):
-    with open(file_path, "rb") as f:
-        f.seek(start)
+    f = await asyncio.to_thread(open, file_path, "rb")
+    try:
+        await asyncio.to_thread(f.seek, start)
         remaining = end - start + 1
         while remaining > 0:
-            chunk = f.read(min(STREAM_CHUNK_SIZE, remaining))
+            chunk = await asyncio.to_thread(f.read, min(STREAM_CHUNK_SIZE, remaining))
             if not chunk:
                 break
             remaining -= len(chunk)
             yield chunk
+    finally:
+        await asyncio.to_thread(f.close)
 
 def resolve_download_path(file_name: str) -> str:
     if not file_name:
