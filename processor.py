@@ -1,6 +1,5 @@
 import os
 import asyncio
-import sys
 import re
 import zipfile
 import shutil
