@@ -24,12 +24,12 @@ def extract_zip_archive(zip_path: str, extract_dir_path: str):
 
 
 async def ensure_zip_extracted(zip_path: str, extract_dir_name: str, extract_dir_path: str):
-    if os.path.exists(extract_dir_path):
+    if await asyncio.to_thread(os.path.exists, extract_dir_path):
         return
 
     lock = get_zip_extraction_lock(extract_dir_name)
     async with lock:
-        if os.path.exists(extract_dir_path):
+        if await asyncio.to_thread(os.path.exists, extract_dir_path):
             return
 
         try:
@@ -40,7 +40,7 @@ async def ensure_zip_extracted(zip_path: str, extract_dir_name: str, extract_dir
 
 async def build_zip_metadata(file_path: str, file_name: str, downloads_dir: str) -> dict:
     base_name = os.path.splitext(os.path.basename(file_path))[0]
-    if not os.path.exists(file_path):
+    if not await asyncio.to_thread(os.path.exists, file_path):
         raise HTTPException(status_code=404, detail="ZIP file not found")
 
     extract_dir_name = f".extracted_{base_name}"
@@ -48,8 +48,8 @@ async def build_zip_metadata(file_path: str, file_name: str, downloads_dir: str)
     await ensure_zip_extracted(file_path, extract_dir_name, extract_dir_path)
 
     playlist = []
-    if os.path.exists(extract_dir_path):
-        for name in sorted(os.listdir(extract_dir_path)):
+    if await asyncio.to_thread(os.path.exists, extract_dir_path):
+        for name in sorted(await asyncio.to_thread(os.listdir, extract_dir_path)):
             if name.endswith((".mp3", ".m4a", ".mp4")):
                 playlist.append({
                     "title": os.path.splitext(name)[0],

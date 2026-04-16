@@ -588,23 +588,26 @@ async def save_active_playback(request: ActivePlaybackStateRequest):
 
 @app.get("/api/library")
 async def get_library():
-    return {"files": library_service.list_library_files(config.DOWNLOADS_DIR)}
+    files = await asyncio.to_thread(library_service.list_library_files, config.DOWNLOADS_DIR)
+    return {"files": files}
 
 
 @app.get("/api/library/imported-book-ids")
 async def get_imported_book_ids():
-    return {"book_ids": library_service.list_library_book_ids(config.DOWNLOADS_DIR)}
+    book_ids = await asyncio.to_thread(library_service.list_library_book_ids, config.DOWNLOADS_DIR)
+    return {"book_ids": book_ids}
 
 @app.get("/api/files/{file_name:path}")
 async def download_file(file_name: str, request: Request):
     file_path = resolve_download_path(file_name)
-    if os.path.exists(file_path):
+    try:
+        stat = await asyncio.to_thread(os.stat, file_path)
+        file_size = stat.st_size
         media_type = guess_media_type(file_path)
         common_headers = {
             "accept-ranges": "bytes",
             "content-disposition": build_inline_content_disposition(file_path),
         }
-        file_size = os.path.getsize(file_path)
         range_header = request.headers.get("range", "")
         byte_range = parse_range_header(range_header, file_size) if range_header else None
         if byte_range is not None:
@@ -630,7 +633,8 @@ async def download_file(file_name: str, request: Request):
         response.headers["accept-ranges"] = "bytes"
         response.headers["content-disposition"] = common_headers["content-disposition"]
         return response
-    raise HTTPException(status_code=404, detail="File not found")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
 
 @app.get("/api/metadata/{file_name}")
 async def get_metadata(file_name: str):
@@ -641,17 +645,19 @@ async def get_metadata(file_name: str):
     if file_name.endswith('.zip'):
         payload = await zip_service.build_zip_metadata(file_path, file_name, config.DOWNLOADS_DIR)
         if isinstance(payload, dict):
-            payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=os.path.getsize(file_path), metadata=payload)
+            stat = await asyncio.to_thread(os.stat, file_path)
+            payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=stat.st_size, metadata=payload)
         return payload
 
     # Handle standard M4B/MP3 with JSON metadata
     json_path = os.path.join(os.path.dirname(file_path), f"{base_name}.json")
-    if os.path.exists(json_path):
+    if await asyncio.to_thread(os.path.exists, json_path):
         try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
+            async with aiofiles.open(json_path, "r", encoding="utf-8") as f:
+                payload = json.loads(await f.read())
             if isinstance(payload, dict):
-                payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=os.path.getsize(file_path), metadata=payload)
+                stat = await asyncio.to_thread(os.stat, file_path)
+                payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=stat.st_size, metadata=payload)
                 return payload
         except Exception:
             logger.exception("Failed to read metadata sidecar: %s", json_path)
