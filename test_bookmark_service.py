@@ -26,6 +26,8 @@ class TestBookmarkService(unittest.TestCase):
         # Ensure modules constants that rely on patched globals are recreated
         bookmark_service.LEGACY_BOOKMARKS_FILE = os.path.join(self.temp_dir, "bookmarks.json")
         bookmark_service.STATE_FILE_NAME = "playback_state.json"
+        bookmark_service._state_cache = None
+        bookmark_service._state_cache_mtime = 0
 
     def tearDown(self):
         self.patcher1.stop()

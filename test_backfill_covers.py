@@ -1,12 +1,3 @@
-import sys
-from unittest.mock import MagicMock
-
-# Mock dependencies to avoid import errors
-sys.modules["httpx"] = MagicMock()
-sys.modules["PIL"] = MagicMock()
-sys.modules["scraper"] = MagicMock()
-sys.modules["processor"] = MagicMock()
-sys.modules["config"] = MagicMock()
 
 import unittest
 from backfill_covers import normalize_text

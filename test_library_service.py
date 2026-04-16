@@ -46,15 +46,15 @@ class TestLibraryService(unittest.TestCase):
             os.remove(temp_path)
 
     def test_sidecar_json_path(self):
-        self.assertEqual(_sidecar_json_path("/a/b/c.mp3"), "/a/b/c.json")
-        self.assertEqual(_sidecar_json_path("/some/long/path/file.name.m4b"), "/some/long/path/file.name.json")
+        self.assertEqual(_sidecar_json_path("/a/b/c.mp3"), os.path.join("/a/b", "c.json"))
+        self.assertEqual(_sidecar_json_path("/some/long/path/file.name.m4b"), os.path.join("/some/long/path", "file.name.json"))
         self.assertEqual(_sidecar_json_path("local.zip"), "local.json")
 
     @patch("library_service.load_sidecar_metadata_from_path")
     def test_load_sidecar_metadata(self, mock_load):
         mock_load.return_value = {"mock": "data"}
         result = load_sidecar_metadata("/path/to/book.mp3")
-        mock_load.assert_called_once_with("/path/to/book.json")
+        mock_load.assert_called_once_with(os.path.join("/path/to", "book.json"))
         self.assertEqual(result, {"mock": "data"})
 
     @patch('os.path.exists')

@@ -1,12 +1,4 @@
-import sys
 import unittest
-from unittest.mock import MagicMock
-
-# Mock required modules before importing processor
-sys.modules['aiofiles'] = MagicMock()
-sys.modules['httpx'] = MagicMock()
-sys.modules['yt_dlp'] = MagicMock()
-sys.modules['config'] = MagicMock()
 
 from processor import parse_ffmpeg_out_time, parse_content_range_header
 
