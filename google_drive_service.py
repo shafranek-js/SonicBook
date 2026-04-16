@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 from urllib.parse import parse_qs, urlencode, urlparse
-import aiofiles
+import asyncio
 
 import httpx
 
@@ -579,8 +579,12 @@ async def _download_drive_file_to_path(client: httpx.AsyncClient, file_id: str, 
         params={"alt": "media", "supportsAllDrives": "true"},
     )
     response.raise_for_status()
-    async with aiofiles.open(destination_path, "wb") as f:
-        await f.write(response.content)
+
+    def write_content():
+        with open(destination_path, "wb") as f:
+            f.write(response.content)
+
+    await asyncio.to_thread(write_content)
     return destination_path
 
 
@@ -706,9 +710,18 @@ async def _read_public_drive_json(file_id: str, resource_key: str = "") -> dict:
 async def _download_public_drive_file_to_path(file_id: str, destination_path: str, resource_key: str = "") -> str:
     client, response = await _open_public_drive_file(file_id, resource_key=resource_key, stream=True)
     try:
-        async with aiofiles.open(destination_path, "wb") as f:
+        f = open(destination_path, "wb")
+        try:
+            buffer = bytearray()
             async for chunk in response.aiter_bytes():
-                await f.write(chunk)
+                buffer.extend(chunk)
+                if len(buffer) >= 1024 * 1024:
+                    await asyncio.to_thread(f.write, buffer)
+                    buffer.clear()
+            if buffer:
+                await asyncio.to_thread(f.write, buffer)
+        finally:
+            f.close()
         return destination_path
     finally:
         await response.aclose()
