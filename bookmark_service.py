@@ -17,6 +17,8 @@ LEGACY_MIGRATION_MARKER = ".profiles-migrated"
 STATE_VERSION = 1
 LEGACY_BOOKMARKS_FILE = os.path.join(config.BASE_DIR, "bookmarks.json")
 
+_state_cache = {}
+
 
 def _normalize_book_name(name: str) -> str:
     base = os.path.splitext(os.path.basename(name or ""))[0]
@@ -227,6 +229,14 @@ def _save_state(state: dict) -> bool:
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         os.replace(temp_path, state_path)
+        try:
+            mtime = os.path.getmtime(state_path)
+        except OSError:
+            mtime = 0
+        _state_cache[state_path] = {
+            "mtime": mtime,
+            "state": _copy_state(payload)
+        }
         return True
     except Exception:
         if os.path.exists(temp_path):
@@ -262,11 +272,43 @@ def _migrate_legacy_bookmarks_if_needed() -> dict | None:
     return migrated_state
 
 
+def _copy_state(state: dict) -> dict:
+    return {
+        "version": state.get("version", STATE_VERSION),
+        "updated_at": state.get("updated_at", 0),
+        "bookmarks": {k: v.copy() if isinstance(v, dict) else v for k, v in state.get("bookmarks", {}).items()},
+        "last_active": state.get("last_active", {}).copy() if isinstance(state.get("last_active"), dict) else {},
+    }
+
 def load_state() -> dict:
+    state_path = _shared_state_file()
+    try:
+        mtime = os.path.getmtime(state_path)
+    except OSError:
+        mtime = None
+
+    if mtime is not None:
+        cached = _state_cache.get(state_path)
+        if cached and cached.get("mtime") == mtime:
+            return _copy_state(cached["state"])
+
     migrated_state = _migrate_legacy_bookmarks_if_needed()
     if migrated_state is not None:
-        return _normalize_state_payload(migrated_state)
-    return _normalize_state_payload(_load_json_file(_shared_state_file()))
+        state = _normalize_state_payload(migrated_state)
+    else:
+        state = _normalize_state_payload(_load_json_file(state_path))
+
+    if mtime is None:
+        try:
+            mtime = os.path.getmtime(state_path)
+        except OSError:
+            mtime = 0
+
+    _state_cache[state_path] = {
+        "mtime": mtime,
+        "state": _copy_state(state)
+    }
+    return _copy_state(state)
 
 
 def load_bookmarks() -> dict:
