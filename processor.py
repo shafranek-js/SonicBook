@@ -503,6 +503,32 @@ async def _handle_ytdlp_download(m3u8_url, task_work_dir, task_id, progress_call
             
     return None, None
 
+async def _download_source(m3u8_url, task_work_dir, task_id, progress_callback):
+    if m3u8_url.startswith("DIRECT_URLS:"):
+        return await _handle_direct_urls_download(m3u8_url, task_work_dir, task_id, progress_callback)
+    elif m3u8_url.startswith("DIRECT_ZIP:"):
+        return await _handle_direct_zip_download(m3u8_url, task_work_dir, task_id, progress_callback)
+    else:
+        return await _handle_ytdlp_download(m3u8_url, task_work_dir, task_id, progress_callback)
+
+async def _download_cover(cover_url, task_work_dir, title_base):
+    if not cover_url:
+        return None
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(cover_url, follow_redirects=True, timeout=30)
+            if r.status_code == 200 and r.headers.get("content-type", "").lower().startswith("image/"):
+                c_ext = resolve_cover_extension(cover_url, r.headers.get("content-type"))
+                cover_path = os.path.join(task_work_dir, f"{title_base}{c_ext}")
+                async with aiofiles.open(cover_path, 'wb') as f:
+                    await f.write(r.content)
+                return cover_path
+            else:
+                return None
+    except Exception as e:
+        log_debug(f"Failed to download cover: {e}")
+        return None
+
 async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progress_callback, cover_url=None, source_url=None):
     task_work_dir = prepare_task_work_dir(task_id)
     source = ""
@@ -512,118 +538,108 @@ async def run_fast_download(task_id, m3u8_url, title_base, chapters, mode, progr
     async def report_assembly_progress(percent, current=None, total=None):
         await progress_callback(percent, current, total, status="assembling", phase="assembling")
 
-    if m3u8_url.startswith("DIRECT_URLS:"):
-        source, source_ext = await _handle_direct_urls_download(m3u8_url, task_work_dir, task_id, progress_callback)
-    elif m3u8_url.startswith("DIRECT_ZIP:"):
-        source, source_ext = await _handle_direct_zip_download(m3u8_url, task_work_dir, task_id, progress_callback)
-    else:
-        source, source_ext = await _handle_ytdlp_download(m3u8_url, task_work_dir, task_id, progress_callback)
+    source, source_ext = await _download_source(m3u8_url, task_work_dir, task_id, progress_callback)
 
     if not source:
         return None
 
     # Download cover if provided
-    if cover_url:
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(cover_url, follow_redirects=True, timeout=30)
-                if r.status_code == 200 and r.headers.get("content-type", "").lower().startswith("image/"):
-                    c_ext = resolve_cover_extension(cover_url, r.headers.get("content-type"))
-                    cover_path = os.path.join(task_work_dir, f"{title_base}{c_ext}")
-                    async with aiofiles.open(cover_path, 'wb') as f:
-                        await f.write(r.content)
-                else:
-                    cover_path = None
-        except Exception as e:
-            log_debug(f"Failed to download cover: {e}")
-            cover_path = None
+    cover_path = await _download_cover(cover_url, task_work_dir, title_base)
 
     # ФИНАЛЬНАЯ СБОРКА И НАРЕЗКА (ОБЩАЯ ДЛЯ ОБОИХ МЕТОДОВ)
+    return await _assemble_and_postprocess(source, source_ext, title_base, chapters, mode, task_id, task_work_dir, cover_path, cover_url, source_url, progress_callback, report_assembly_progress)
+
+def _validate_zip(path):
+    import zipfile
+    if not zipfile.is_zipfile(path):
+        raise RuntimeError("Downloaded ZIP file is corrupted or not a valid archive")
     try:
-        if source:
-            final_file = ""
-            final_source_path = ""
-            assembled_with_progress = False
-            if mode == "zip" and chapters:
-                await report_assembly_progress(0.0, 0, len(chapters))
-                final_source_path = await split_to_chapters(source, chapters, title_base, task_id, task_work_dir, source_ext, report_assembly_progress)
-                final_file = f"{title_base}.zip"
-                assembled_with_progress = True
-            elif mode == "m4b" and chapters:
-                await report_assembly_progress(0.0, 0, 100)
-                final_source_path = await create_m4b_with_chapters(source, chapters, title_base, task_id, task_work_dir, cover_path, lambda pct: report_assembly_progress(pct, round(pct), 100))
-                final_file = f"{title_base}.m4b"
-                assembled_with_progress = True
-            else:
-                final_file = f"{title_base}{source_ext}"
-                final_source_path = source
+        with zipfile.ZipFile(path) as zf:
+            if zf.testzip() is not None:
+                raise RuntimeError("Downloaded ZIP file contains broken files")
+    except Exception as e:
+        if isinstance(e, RuntimeError):
+            raise
+        raise RuntimeError(f"ZIP validation failed: {e}")
 
-            if not final_source_path or not os.path.exists(final_source_path):
-                return None
+async def _write_metadata_json(task_work_dir, title_base, effective_mode, final_file, chapters, source_url, cover_url, cover_path):
+    try:
+        import json
+        staged_meta_json_path = os.path.join(task_work_dir, f"{title_base}.json")
+        meta_data = {
+            "title": title_base,
+            "mode": effective_mode,
+            "file_name": final_file,
+            "chapters": chapters,
+            "source_url": source_url,
+            "cover_url": cover_url,
+            "local_cover": os.path.basename(cover_path) if cover_path else None
+        }
+        async with aiofiles.open(staged_meta_json_path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(meta_data, ensure_ascii=False, indent=2))
+        await asyncio.to_thread(move_to_library, staged_meta_json_path, f"{title_base}.json")
+    except Exception as meta_e:
+        log_debug(f"Failed to write metadata JSON: {meta_e}")
 
-            # Валидация ZIP-файла перед переносом в библиотеку
-            if final_file.lower().endswith(".zip"):
-                def validate_zip(path):
-                    import zipfile
-                    if not zipfile.is_zipfile(path):
-                        raise RuntimeError("Downloaded ZIP file is corrupted or not a valid archive")
-                    try:
-                        with zipfile.ZipFile(path) as zf:
-                            if zf.testzip() is not None:
-                                raise RuntimeError("Downloaded ZIP file contains broken files")
-                    except Exception as e:
-                        if isinstance(e, RuntimeError):
-                            raise
-                        raise RuntimeError(f"ZIP validation failed: {e}")
-                await asyncio.to_thread(validate_zip, final_source_path)
+async def _assemble_and_postprocess(source, source_ext, title_base, chapters, mode, task_id, task_work_dir, cover_path, cover_url, source_url, progress_callback, report_assembly_progress):
+    try:
+        if not source:
+            return None
 
-            post_steps_total = 2 + (1 if cover_path and os.path.exists(cover_path) else 0)
-            post_steps_done = 0
-            if not assembled_with_progress:
-                await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
+        final_file = ""
+        final_source_path = ""
+        assembled_with_progress = False
+        if mode == "zip" and chapters:
+            await report_assembly_progress(0.0, 0, len(chapters))
+            final_source_path = await split_to_chapters(source, chapters, title_base, task_id, task_work_dir, source_ext, report_assembly_progress)
+            final_file = f"{title_base}.zip"
+            assembled_with_progress = True
+        elif mode == "m4b" and chapters:
+            await report_assembly_progress(0.0, 0, 100)
+            final_source_path = await create_m4b_with_chapters(source, chapters, title_base, task_id, task_work_dir, cover_path, lambda pct: report_assembly_progress(pct, round(pct), 100))
+            final_file = f"{title_base}.m4b"
+            assembled_with_progress = True
+        else:
+            final_file = f"{title_base}{source_ext}"
+            final_source_path = source
 
-            moved_final_path = await asyncio.to_thread(move_to_library, final_source_path, final_file)
-            if not moved_final_path:
-                return None
+        if not final_source_path or not os.path.exists(final_source_path):
+            return None
+
+        # Валидация ZIP-файла перед переносом в библиотеку
+        if final_file.lower().endswith(".zip"):
+            await asyncio.to_thread(_validate_zip, final_source_path)
+
+        post_steps_total = 2 + (1 if cover_path and os.path.exists(cover_path) else 0)
+        post_steps_done = 0
+        if not assembled_with_progress:
+            await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
+
+        moved_final_path = await asyncio.to_thread(move_to_library, final_source_path, final_file)
+        if not moved_final_path:
+            return None
+        post_steps_done += 1
+        if not assembled_with_progress:
+            await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
+        if os.path.exists(source) and os.path.abspath(source) != os.path.abspath(final_source_path):
+            os.remove(source)
+
+        # Generate JSON metadata for the integrated web player
+        effective_mode = "zip" if source_ext == ".zip" or final_file.lower().endswith(".zip") else mode
+        await _write_metadata_json(task_work_dir, title_base, effective_mode, final_file, chapters, source_url, cover_url, cover_path)
+        post_steps_done += 1
+        if not assembled_with_progress:
+            await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
+
+        if cover_path and os.path.exists(cover_path):
+            await asyncio.to_thread(move_to_library, cover_path, os.path.basename(cover_path))
             post_steps_done += 1
             if not assembled_with_progress:
                 await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
-            if os.path.exists(source) and os.path.abspath(source) != os.path.abspath(final_source_path):
-                os.remove(source)
 
-            # Generate JSON metadata for the integrated web player
-            try:
-                import json
-                staged_meta_json_path = os.path.join(task_work_dir, f"{title_base}.json")
-                effective_mode = "zip" if source_ext == ".zip" or final_file.lower().endswith(".zip") else mode
-                meta_data = {
-                    "title": title_base,
-                    "mode": effective_mode,
-                    "file_name": final_file,
-                    "chapters": chapters,
-                    "source_url": source_url,
-                    "cover_url": cover_url,
-                    "local_cover": os.path.basename(cover_path) if cover_path else None
-                }
-                async with aiofiles.open(staged_meta_json_path, "w", encoding="utf-8") as f:
-                    await f.write(json.dumps(meta_data, ensure_ascii=False, indent=2))
-                await asyncio.to_thread(move_to_library, staged_meta_json_path, f"{title_base}.json")
-            except Exception as meta_e:
-                log_debug(f"Failed to write metadata JSON: {meta_e}")
-            post_steps_done += 1
-            if not assembled_with_progress:
-                await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
+        shutil.rmtree(task_work_dir, ignore_errors=True)
 
-            if cover_path and os.path.exists(cover_path):
-                await asyncio.to_thread(move_to_library, cover_path, os.path.basename(cover_path))
-                post_steps_done += 1
-                if not assembled_with_progress:
-                    await progress_callback(100.0, post_steps_done, post_steps_total, status="merging", phase="downloading")
-
-            shutil.rmtree(task_work_dir, ignore_errors=True)
-
-            return final_file
-        return None
+        return final_file
     except Exception as e:
         log_debug(f"Final assembly error: {e}")
         if isinstance(e, RuntimeError):
