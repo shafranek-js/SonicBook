@@ -348,6 +348,34 @@ async def _parse_browser_based(book_url, res):
 
     return playwright_failure
 
+async def _parse_audioboo(book_url, res):
+    log_debug("Detected audioboo.org, using ZIP parser...")
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+        async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
+            resp = await client.get(book_url, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                h1 = soup.find("h1")
+                if h1:
+                    res["title"] = h1.get_text(" ", strip=True)
+
+                res["cover"] = extract_cover_url(soup, book_url)
+                zip_url = extract_audioboo_zip_url(resp.text, str(resp.url))
+                if zip_url:
+                    log_debug(f"Audioboo: Found direct ZIP URL {zip_url}")
+                    res["m3u8"] = f"DIRECT_ZIP:{zip_url}"
+                    return res["m3u8"], res["title"], res["chapters"], res["cover"]
+    except Exception as e:
+        log_debug(f"Audioboo parse error: {e}")
+        return None, "audiobook", [], None
+
+    return None
+
 async def get_book_info(book_url):
     log_debug(f"Combined info scraping: {book_url}")
     res = {"m3u8": None, "title": "audiobook", "chapters": [], "cover": None}
@@ -357,30 +385,9 @@ async def get_book_info(book_url):
         return await _parse_knigavuhe(book_url)
 
     if "audioboo.org" in book_url:
-        log_debug("Detected audioboo.org, using ZIP parser...")
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-            }
-            async with httpx.AsyncClient(http2=True, follow_redirects=True) as client:
-                resp = await client.get(book_url, headers=headers, timeout=30)
-                if resp.status_code == 200:
-                    soup = BeautifulSoup(resp.text, "html.parser")
-                    h1 = soup.find("h1")
-                    if h1:
-                        res["title"] = h1.get_text(" ", strip=True)
-
-                    res["cover"] = extract_cover_url(soup, book_url)
-                    zip_url = extract_audioboo_zip_url(resp.text, str(resp.url))
-                    if zip_url:
-                        log_debug(f"Audioboo: Found direct ZIP URL {zip_url}")
-                        res["m3u8"] = f"DIRECT_ZIP:{zip_url}"
-                        return res["m3u8"], res["title"], [], res["cover"]
-        except Exception as e:
-            log_debug(f"Audioboo parse error: {e}")
-            return None, "audiobook", [], None
+        audioboo_res = await _parse_audioboo(book_url, res)
+        if audioboo_res is not None:
+            return audioboo_res
 
     await _parse_text_based(book_url, res)
     
