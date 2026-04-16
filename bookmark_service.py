@@ -127,6 +127,16 @@ def _shared_state_file() -> str:
     return os.path.join(_profile_state_dir(), STATE_FILE_NAME)
 
 
+
+_state_cache = None
+_state_cache_mtime = 0
+
+def _copy_state(st: dict) -> dict:
+    import copy
+    return copy.deepcopy(st)
+
+
+
 def _default_state() -> dict:
     return {
         "version": STATE_VERSION,
@@ -214,6 +224,7 @@ def _normalize_state_payload(payload) -> dict:
 
 
 def _save_state(state: dict) -> bool:
+    global _state_cache, _state_cache_mtime
     state_path = _shared_state_file()
     temp_path = state_path + ".tmp"
     payload = {
@@ -227,6 +238,14 @@ def _save_state(state: dict) -> bool:
         with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         os.replace(temp_path, state_path)
+
+        # Invalidate cache locally
+        try:
+            _state_cache_mtime = os.path.getmtime(state_path)
+        except OSError:
+            _state_cache_mtime = 0
+        _state_cache = _copy_state(payload)
+
         return True
     except Exception:
         if os.path.exists(temp_path):
@@ -263,10 +282,48 @@ def _migrate_legacy_bookmarks_if_needed() -> dict | None:
 
 
 def load_state() -> dict:
+    global _state_cache, _state_cache_mtime
     migrated_state = _migrate_legacy_bookmarks_if_needed()
     if migrated_state is not None:
-        return _normalize_state_payload(migrated_state)
-    return _normalize_state_payload(_load_json_file(_shared_state_file()))
+        # If a migration just occurred, don't use cache, normalize and return directly
+        state = _normalize_state_payload(migrated_state)
+        _state_cache = _copy_state(state)
+        state_file = _shared_state_file()
+        try:
+            _state_cache_mtime = os.path.getmtime(state_file)
+        except OSError:
+            _state_cache_mtime = 0
+        return _copy_state(state)
+
+    state_file = _shared_state_file()
+    try:
+        mtime = os.path.getmtime(state_file)
+    except OSError:
+        mtime = 0
+
+    if _state_cache is not None and mtime > 0 and _state_cache_mtime == mtime:
+        return _copy_state(_state_cache)
+
+    raw_state = _load_json_file(state_file)
+    state = _normalize_state_payload(raw_state)
+    _state_cache = _copy_state(state)
+    _state_cache_mtime = mtime
+    return _copy_state(state)
+
+    state_file = _shared_state_file()
+    try:
+        mtime = os.path.getmtime(state_file)
+    except OSError:
+        mtime = 0
+
+    if _state_cache is not None and mtime > 0 and _state_cache_mtime == mtime:
+        return _copy_state(_state_cache)
+
+    raw_state = _load_json_file(state_file)
+    state = _normalize_state_payload(raw_state)
+    _state_cache = _copy_state(state)
+    _state_cache_mtime = mtime
+    return state
 
 
 def load_bookmarks() -> dict:
