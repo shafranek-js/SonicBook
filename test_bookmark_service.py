@@ -33,10 +33,33 @@ class TestBookmarkService(unittest.TestCase):
         self.patcher3.stop()
         shutil.rmtree(self.temp_dir)
 
-    def test_normalize_book_name(self):
+    def test_normalize_book_name_standard(self):
+        self.assertEqual(bookmark_service._normalize_book_name("The Great Gatsby"), "the great gatsby")
         self.assertEqual(bookmark_service._normalize_book_name("Test Book 123.mp3"), "test book 123")
         self.assertEqual(bookmark_service._normalize_book_name("  Test   Book  "), "test book")
         self.assertEqual(bookmark_service._normalize_book_name("Test_Book-Name"), "test_book name")
+
+    def test_normalize_book_name_with_extension(self):
+        self.assertEqual(bookmark_service._normalize_book_name("The Great Gatsby.mp3"), "the great gatsby")
+        self.assertEqual(bookmark_service._normalize_book_name("book_name.m4b"), "book_name")
+
+    def test_normalize_book_name_special_chars(self):
+        self.assertEqual(bookmark_service._normalize_book_name("Book-Name! @With# Special$ Characters%"), "book name with special characters")
+        self.assertEqual(bookmark_service._normalize_book_name("Book_Name_With_Underscores"), "book_name_with_underscores") # \w includes underscores
+
+    def test_normalize_book_name_unicode(self):
+        self.assertEqual(bookmark_service._normalize_book_name("Толстой - Война и мир.mp3"), "толстой война и мир")
+        self.assertEqual(bookmark_service._normalize_book_name("L'Étranger"), "l étranger")
+
+    def test_normalize_book_name_extra_spaces(self):
+        self.assertEqual(bookmark_service._normalize_book_name("  Book   with    spaces  "), "book with spaces")
+
+    def test_normalize_book_name_empty(self):
+        self.assertEqual(bookmark_service._normalize_book_name(""), "")
+        self.assertEqual(bookmark_service._normalize_book_name(None), "")
+
+    def test_normalize_book_name_path(self):
+        self.assertEqual(bookmark_service._normalize_book_name("/path/to/some/Book Name.mp3"), "book name")
 
     def test_build_book_id(self):
         self.assertEqual(bookmark_service.build_book_id("Test Book", 1024), "book:file:test book:1024")
@@ -84,19 +107,6 @@ class TestBookmarkService(unittest.TestCase):
         self.assertIsNotNone(bookmark)
         self.assertEqual(bookmark["time"], 10.5)
 
-        # Test getting aliases via name, not via direct alias id
-        # get_bookmark relies on build_book_id_aliases which builds from book_id
-        # "book:file:test book" -> "book:test book". If the dict has "book:file:test book:1024",
-        # looking up "book:file:test book" doesn't find the 1024 variant because "book:file:test book"
-        # aliases are ['book:file:test book', 'book:test book'].
-        # BUT if we lookup using the *same name*, `get_bookmark` isn't used that way, it takes a book_id.
-        # It's an ID-to-alias mapping, not alias-to-all-possible-IDs.
-
-        # We instead check that `save_bookmark` does the re-mapping.
-        # If we save under 'book:file:test book', it doesn't overwrite 'book:file:test book:1024'.
-        # However, what we really want to test is `get_bookmark` works correctly for its own aliases.
-
-        # Let's save under a legacy id, then query under a new id.
         bookmark_service.save_bookmarks({"book:test legacy book": payload})
         self.assertIsNotNone(bookmark_service.get_bookmark("book:file:test legacy book:2048"))
 
@@ -121,11 +131,6 @@ class TestBookmarkService(unittest.TestCase):
         # Ensure it exists
         self.assertIsNotNone(bookmark_service.get_bookmark(book_id))
 
-        # Deleting an alias does not delete the original because
-        # `build_book_id_aliases` for 'book:file:delete book' only yields
-        # 'book:file:delete book' and 'book:delete book', it DOES NOT
-        # yield 'book:file:delete book:1024'.
-        # To delete properly, we should delete the exact book_id.
         self.assertTrue(bookmark_service.delete_bookmark(book_id))
 
         # Ensure it's gone
