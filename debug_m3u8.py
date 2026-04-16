@@ -1,6 +1,5 @@
 import asyncio
 from playwright.async_api import async_playwright
-import re
 
 async def debug_m3u8(url):
     print(f"Debugging M3U8 for: {url}")
