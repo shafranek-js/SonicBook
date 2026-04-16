@@ -16,8 +16,15 @@ def log_debug(message):
 
 def parse_ffmpeg_out_time(value):
     try:
-        hours, minutes, seconds = value.strip().split(":")
-        return (int(hours) * 3600) + (int(minutes) * 60) + float(seconds)
+        val_str = value.strip()
+        is_negative = val_str.startswith("-")
+        if is_negative:
+            val_str = val_str[1:]
+
+        hours, minutes, seconds = val_str.split(":")
+        total_seconds = (int(hours) * 3600) + (int(minutes) * 60) + float(seconds)
+
+        return -total_seconds if is_negative else total_seconds
     except Exception:
         return 0.0
 
