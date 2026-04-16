@@ -121,12 +121,6 @@ def get_google_drive_settings():
     return copy.deepcopy(settings.get("google_drive", DEFAULT_SETTINGS["google_drive"]))
 
 
-def save_google_drive_settings(google_drive_settings):
-    settings = load_settings()
-    settings["google_drive"] = _deep_merge(DEFAULT_SETTINGS["google_drive"], google_drive_settings or {})
-    return save_settings(settings)
-
-
 def clear_google_drive_auth():
     settings = load_settings()
     google_drive = settings.get("google_drive", {})
