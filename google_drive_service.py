@@ -574,13 +574,21 @@ async def list_google_drive_library_files_cached(folder_id: str = "", force_refr
 
 
 async def _download_drive_file_to_path(client: httpx.AsyncClient, file_id: str, destination_path: str):
-    response = await client.get(
+    async with client.stream(
+        "GET",
         f"https://www.googleapis.com/drive/v3/files/{file_id}",
         params={"alt": "media", "supportsAllDrives": "true"},
-    )
-    response.raise_for_status()
-    async with aiofiles.open(destination_path, "wb") as f:
-        await f.write(response.content)
+    ) as response:
+        response.raise_for_status()
+        async with aiofiles.open(destination_path, "wb") as f:
+            buffer = bytearray()
+            async for chunk in response.aiter_bytes():
+                buffer.extend(chunk)
+                if len(buffer) >= 1024 * 1024:  # 1MB buffer
+                    await f.write(buffer)
+                    buffer.clear()
+            if buffer:
+                await f.write(buffer)
     return destination_path
 
 
@@ -707,8 +715,14 @@ async def _download_public_drive_file_to_path(file_id: str, destination_path: st
     client, response = await _open_public_drive_file(file_id, resource_key=resource_key, stream=True)
     try:
         async with aiofiles.open(destination_path, "wb") as f:
+            buffer = bytearray()
             async for chunk in response.aiter_bytes():
-                await f.write(chunk)
+                buffer.extend(chunk)
+                if len(buffer) >= 1024 * 1024:  # 1MB buffer
+                    await f.write(buffer)
+                    buffer.clear()
+            if buffer:
+                await f.write(buffer)
         return destination_path
     finally:
         await response.aclose()
