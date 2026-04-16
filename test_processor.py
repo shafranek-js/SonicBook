@@ -8,7 +8,43 @@ sys.modules['httpx'] = MagicMock()
 sys.modules['yt_dlp'] = MagicMock()
 sys.modules['config'] = MagicMock()
 
-from processor import parse_ffmpeg_out_time
+from processor import parse_ffmpeg_out_time, parse_content_range_header
+
+class TestParseContentRangeHeader(unittest.TestCase):
+    def test_valid_range_with_total(self):
+        self.assertEqual(
+            parse_content_range_header("bytes 0-499/1234"),
+            {"start": 0, "end": 499, "total": 1234}
+        )
+        self.assertEqual(
+            parse_content_range_header("BYTES 500-999/1234"),
+            {"start": 500, "end": 999, "total": 1234}
+        )
+        self.assertEqual(
+            parse_content_range_header("bytes 1000-1233/1234"),
+            {"start": 1000, "end": 1233, "total": 1234}
+        )
+        self.assertEqual(
+            parse_content_range_header("  bytes 0-100/200  "),
+            {"start": 0, "end": 100, "total": 200}
+        )
+
+    def test_valid_range_with_star(self):
+        self.assertEqual(
+            parse_content_range_header("bytes 0-499/*"),
+            {"start": 0, "end": 499, "total": None}
+        )
+        self.assertEqual(
+            parse_content_range_header("bytes 500-999/*"),
+            {"start": 500, "end": 999, "total": None}
+        )
+
+    def test_invalid_range(self):
+        self.assertIsNone(parse_content_range_header("invalid"))
+        self.assertIsNone(parse_content_range_header(""))
+        self.assertIsNone(parse_content_range_header(None))
+        self.assertIsNone(parse_content_range_header("bytes 0-499"))
+        self.assertIsNone(parse_content_range_header("0-499/1234"))
 
 class TestParseFfmpegOutTime(unittest.TestCase):
     def test_valid_time(self):
