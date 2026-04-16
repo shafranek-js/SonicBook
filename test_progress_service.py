@@ -100,5 +100,57 @@ class TestProgressService(unittest.TestCase):
     def test_find_active_task_by_source_empty_url(self):
         self.assertIsNone(progress_service.find_active_task_by_source(""))
 
+    def test_get_progress_returns_copy(self):
+        task_id = "task-mut"
+        payload = {"status": "processing", "percent": 50.0, "nested": {"a": 1}}
+        progress_service.set_progress(task_id, payload)
+
+        result = progress_service.get_progress(task_id)
+        result["percent"] = 99.0
+        result["nested"]["a"] = 2
+
+        result2 = progress_service.get_progress(task_id)
+        self.assertEqual(result2["percent"], 50.0)
+        self.assertEqual(result2["nested"]["a"], 1)
+
+    def test_set_progress_stores_copy(self):
+        task_id = "task-mut-2"
+        payload = {"status": "processing", "percent": 50.0, "nested": {"a": 1}}
+        progress_service.set_progress(task_id, payload)
+
+        payload["percent"] = 99.0
+        payload["nested"]["a"] = 2
+
+        result = progress_service.get_progress(task_id)
+        self.assertEqual(result["percent"], 50.0)
+        self.assertEqual(result["nested"]["a"], 1)
+
+    def test_update_progress_returns_copy(self):
+        task_id = "task-mut-3"
+        payload = {"status": "processing", "percent": 50.0, "nested": {"a": 1}}
+        progress_service.set_progress(task_id, payload)
+
+        result = progress_service.update_progress_entry(task_id, percent=75.0)
+        result["percent"] = 99.0
+        result["nested"]["a"] = 2
+
+        result2 = progress_service.get_progress(task_id)
+        self.assertEqual(result2["percent"], 75.0)
+        self.assertEqual(result2["nested"]["a"], 1)
+
+    def test_find_active_task_returns_copy(self):
+        url = "http://mut-test.com"
+        task_id = "task-mut-4"
+        payload = {"source_url": url, "status": "downloading", "nested": {"a": 1}}
+        progress_service.set_progress(task_id, payload)
+
+        tid, data = progress_service.find_active_task_by_source(url)
+        data["status"] = "success"
+        data["nested"]["a"] = 2
+
+        tid2, data2 = progress_service.find_active_task_by_source(url)
+        self.assertEqual(data2["status"], "downloading")
+        self.assertEqual(data2["nested"]["a"], 1)
+
 if __name__ == "__main__":
     unittest.main()
