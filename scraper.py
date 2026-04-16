@@ -6,7 +6,7 @@ import base64
 import html
 import httpx
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright, Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from urllib.parse import urljoin, urlparse, parse_qs, unquote
 from processor import sanitize_filename
 
