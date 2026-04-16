@@ -1,7 +1,7 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from fastapi import HTTPException
 
@@ -29,6 +29,33 @@ class TestZipService(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(context.exception.status_code, 500)
         self.assertEqual(context.exception.detail, "Failed to extract ZIP for playback")
+
+    @patch("zip_service.zipfile.ZipFile")
+    def test_extract_zip_archive_malicious_path(self, mock_zipfile):
+        mock_archive = MagicMock()
+        mock_zipfile.return_value.__enter__.return_value = mock_archive
+
+        mock_member = MagicMock()
+        mock_member.filename = "../../../etc/passwd"
+        mock_archive.infolist.return_value = [mock_member]
+
+        with self.assertRaises(ValueError) as context:
+            zip_service.extract_zip_archive("dummy.zip", "/path/to/extract")
+
+        self.assertIn("Malicious member path detected", str(context.exception))
+
+    @patch("zip_service.zipfile.ZipFile")
+    def test_extract_zip_archive_success(self, mock_zipfile):
+        mock_archive = MagicMock()
+        mock_zipfile.return_value.__enter__.return_value = mock_archive
+
+        mock_member = MagicMock()
+        mock_member.filename = "safe_file.txt"
+        mock_archive.infolist.return_value = [mock_member]
+
+        zip_service.extract_zip_archive("dummy.zip", "/path/to/extract")
+
+        mock_archive.extractall.assert_called_once_with("/path/to/extract")
 
 if __name__ == '__main__':
     unittest.main()
