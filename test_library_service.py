@@ -2,7 +2,6 @@ import unittest
 import os
 import tempfile
 import json
-from unittest.mock import patch
 
 from library_service import load_sidecar_metadata_from_path
 

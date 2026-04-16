@@ -16,7 +16,6 @@ sys.modules["library_service"] = MagicMock()
 
 import zip_service
 from fastapi import HTTPException
-import os
 
 class TestZipService(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

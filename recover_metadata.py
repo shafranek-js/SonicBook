@@ -1,7 +1,6 @@
 import os
 import json
 import asyncio
-import subprocess
 import config
 
 async def extract_chapters_from_file(file_path):

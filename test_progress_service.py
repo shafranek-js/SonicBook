@@ -1,6 +1,5 @@
 import unittest
 from unittest.mock import patch
-import time
 import progress_service
 
 class TestProgressService(unittest.TestCase):
