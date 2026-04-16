@@ -85,17 +85,6 @@ class TestBookmarkService(unittest.TestCase):
         self.assertEqual(bookmark["time"], 10.5)
 
         # Test getting aliases via name, not via direct alias id
-        # get_bookmark relies on build_book_id_aliases which builds from book_id
-        # "book:file:test book" -> "book:test book". If the dict has "book:file:test book:1024",
-        # looking up "book:file:test book" doesn't find the 1024 variant because "book:file:test book"
-        # aliases are ['book:file:test book', 'book:test book'].
-        # BUT if we lookup using the *same name*, `get_bookmark` isn't used that way, it takes a book_id.
-        # It's an ID-to-alias mapping, not alias-to-all-possible-IDs.
-
-        # We instead check that `save_bookmark` does the re-mapping.
-        # If we save under 'book:file:test book', it doesn't overwrite 'book:file:test book:1024'.
-        # However, what we really want to test is `get_bookmark` works correctly for its own aliases.
-
         # Let's save under a legacy id, then query under a new id.
         bookmark_service.save_bookmarks({"book:test legacy book": payload})
         self.assertIsNotNone(bookmark_service.get_bookmark("book:file:test legacy book:2048"))
@@ -121,11 +110,6 @@ class TestBookmarkService(unittest.TestCase):
         # Ensure it exists
         self.assertIsNotNone(bookmark_service.get_bookmark(book_id))
 
-        # Deleting an alias does not delete the original because
-        # `build_book_id_aliases` for 'book:file:delete book' only yields
-        # 'book:file:delete book' and 'book:delete book', it DOES NOT
-        # yield 'book:file:delete book:1024'.
-        # To delete properly, we should delete the exact book_id.
         self.assertTrue(bookmark_service.delete_bookmark(book_id))
 
         # Ensure it's gone
@@ -171,6 +155,164 @@ class TestBookmarkService(unittest.TestCase):
 
         # Shared state file should be created
         self.assertTrue(os.path.exists(bookmark_service._shared_state_file()))
+
+    def test_build_legacy_book_id(self):
+        self.assertEqual(bookmark_service.build_legacy_book_id("Test Book"), "book:test book")
+        self.assertEqual(bookmark_service.build_legacy_book_id(""), "")
+        self.assertEqual(bookmark_service.build_legacy_book_id(metadata={"title": "Test Book"}), "book:test book")
+
+    def test_derive_aliases_from_book_id(self):
+        self.assertEqual(bookmark_service._derive_aliases_from_book_id(""), [])
+        self.assertEqual(bookmark_service._derive_aliases_from_book_id("invalid"), [])
+        self.assertEqual(bookmark_service._derive_aliases_from_book_id("book:file:test:1024"), ["book:test", "book:file:test"])
+
+    def test_build_book_id_aliases_with_name(self):
+        aliases = bookmark_service.build_book_id_aliases(name="Test Book", size_bytes=1024)
+        self.assertIn("book:file:test book:1024", aliases)
+        self.assertIn("book:file:test book", aliases)
+        self.assertIn("book:test book", aliases)
+
+    def test_get_state_storage_status(self):
+        status = bookmark_service.get_state_storage_status()
+        self.assertEqual(status["profile_id"], "test_profile")
+        self.assertEqual(status["configured_id"], "test")
+        self.assertEqual(status["source"], "device")
+        self.assertTrue("state_file" in status)
+        self.assertTrue("legacy_state_file" in status)
+
+    def test_load_json_file_exception(self):
+        temp_file = os.path.join(self.temp_dir, "test.json")
+        with open(temp_file, "w") as f:
+            f.write("{}")
+        with patch("builtins.open", side_effect=Exception("Read Error")):
+            self.assertIsNone(bookmark_service._load_json_file(temp_file))
+
+    def test_write_marker_file_exception(self):
+        temp_file = os.path.join(self.temp_dir, "marker.txt")
+        with patch("builtins.open", side_effect=Exception("Write Error")):
+            bookmark_service._write_marker_file(temp_file)
+            self.assertFalse(os.path.exists(temp_file))
+
+    def test_normalize_last_active_non_dict(self):
+        self.assertEqual(bookmark_service._normalize_last_active(None), {})
+        self.assertEqual(bookmark_service._normalize_last_active([]), {})
+        self.assertEqual(bookmark_service._normalize_last_active({"invalid": "data"}), {})
+
+    def test_normalize_state_payload_legacy_flat(self):
+        payload = {
+            "book:test": {"time": 10, "duration": 100}
+        }
+        state = bookmark_service._normalize_state_payload(payload)
+        self.assertEqual(state["bookmarks"]["book:test"]["time"], 10)
+        self.assertEqual(state["updated_at"], 0)
+
+        state_non_dict = bookmark_service._normalize_state_payload(None)
+        self.assertEqual(state_non_dict["bookmarks"], {})
+
+    def test_save_state_exception(self):
+        with patch("bookmark_service._ensure_shared_state_dir", side_effect=Exception("Save Error")):
+            # Even with exception, it should return False
+            self.assertFalse(bookmark_service._save_state({"bookmarks": {}}))
+
+        # test temp file cleanup
+        state_path = bookmark_service._shared_state_file()
+        temp_path = state_path + ".tmp"
+        os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+        with open(temp_path, "w") as f:
+            f.write("test")
+
+        with patch("builtins.open", side_effect=Exception("Save Error")):
+            self.assertFalse(bookmark_service._save_state({"bookmarks": {}}))
+            self.assertFalse(os.path.exists(temp_path))
+
+        with open(temp_path, "w") as f:
+            f.write("test")
+        with patch("builtins.open", side_effect=Exception("Save Error")):
+            with patch("os.remove", side_effect=OSError("Remove Error")):
+                self.assertFalse(bookmark_service._save_state({"bookmarks": {}}))
+                self.assertTrue(os.path.exists(temp_path))
+
+    def test_migrate_legacy_bookmarks_if_needed_no_legacy_file(self):
+        self.assertIsNone(bookmark_service._migrate_legacy_bookmarks_if_needed())
+
+        # Test with marker existing
+        marker_path = bookmark_service._legacy_migration_marker_file()
+        bookmark_service._write_marker_file(marker_path)
+        self.assertIsNone(bookmark_service._migrate_legacy_bookmarks_if_needed())
+
+        # Remove marker
+        os.remove(marker_path)
+
+        # Create legacy shared state
+        legacy_shared = bookmark_service._legacy_shared_state_file()
+        os.makedirs(os.path.dirname(legacy_shared), exist_ok=True)
+        with open(legacy_shared, "w") as f:
+            json.dump({"book:shared": {"time": 1}}, f)
+
+        migrated = bookmark_service._migrate_legacy_bookmarks_if_needed()
+        self.assertIsNotNone(migrated)
+        self.assertIn("book:shared", migrated["bookmarks"])
+        self.assertTrue(os.path.exists(marker_path))
+
+    def test_list_bookmarks(self):
+        bookmark_service.save_bookmarks({"book:test": {"time": 10}})
+        bookmarks = bookmark_service.list_bookmarks()
+        self.assertIn("book:test", bookmarks)
+
+    def test_save_last_active_errors(self):
+        with self.assertRaises(RuntimeError):
+            bookmark_service.save_last_active({})
+
+        with patch("bookmark_service._save_state", return_value=False):
+            with self.assertRaises(RuntimeError):
+                bookmark_service.save_last_active({"book_id": "test"})
+
+    def test_save_bookmark_edge_cases(self):
+        with self.assertRaises(RuntimeError):
+            bookmark_service.save_bookmark("", {})
+
+        saved = bookmark_service.save_bookmark("book:edge", {
+            "time": -10,
+            "duration": -20,
+            "track": -5,
+            "completed": "1"
+        })
+        self.assertEqual(saved["time"], 0)
+        self.assertEqual(saved["duration"], 0)
+        self.assertEqual(saved["track"], 0)
+        self.assertTrue(saved["completed"])
+
+        saved2 = bookmark_service.save_bookmark("book:edge", {
+            "completed": "invalid"
+        })
+        self.assertFalse(saved2["completed"])
+
+        # Test replacing an alias bookmark
+        # Manually save a bookmark under an alias
+        bookmark_service.save_bookmarks({"book:file:replace": {"time": 5}})
+        # Saving under new ID with aliases including the one we just saved
+        bookmark_service.save_bookmark("book:file:replace:100", {"time": 20})
+        bookmarks = bookmark_service.load_bookmarks()
+        self.assertIn("book:file:replace:100", bookmarks)
+        self.assertNotIn("book:file:replace", bookmarks)
+
+        with patch("bookmark_service._save_state", return_value=False):
+            with self.assertRaises(RuntimeError):
+                bookmark_service.save_bookmark("book:edge", {})
+
+    def test_delete_bookmark_edge_cases(self):
+        self.assertFalse(bookmark_service.delete_bookmark(""))
+
+        # Test unchanged state
+        self.assertTrue(bookmark_service.delete_bookmark("book:nonexistent"))
+
+        # Test active bookmark deletion
+        bookmark_service.save_last_active({"book_id": "book:delete"})
+        bookmark_service.save_bookmark("book:delete", {"time": 10})
+        self.assertTrue(bookmark_service.delete_bookmark("book:delete"))
+
+        state = bookmark_service.load_state()
+        self.assertEqual(state["last_active"], {})
 
 if __name__ == '__main__':
     unittest.main()
