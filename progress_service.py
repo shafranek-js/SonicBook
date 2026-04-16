@@ -1,5 +1,5 @@
 import time
-
+import copy
 
 progress_store = {}
 terminal_progress_statuses = {"success", "error", "not_found"}
@@ -20,7 +20,8 @@ def create_progress_entry(source_url: str = "", mode: str = "") -> dict:
 
 
 def get_progress(task_id: str) -> dict:
-    return progress_store.get(task_id, {"status": "not_found"})
+    entry = progress_store.get(task_id, {"status": "not_found"})
+    return copy.deepcopy(entry)
 
 
 def set_progress(task_id: str, payload: dict):
@@ -34,7 +35,7 @@ def update_progress_entry(task_id: str, **fields):
 
     entry.update(fields)
     entry["timestamp"] = time.time()
-    return entry
+    return copy.deepcopy(entry)
 
 
 def cleanup_expired_progress(expire_seconds: int) -> list[str]:
@@ -57,5 +58,5 @@ def find_active_task_by_source(source_url: str):
             continue
         if data.get("status") in terminal_progress_statuses:
             continue
-        return task_id, data
+        return task_id, copy.deepcopy(data)
     return None
