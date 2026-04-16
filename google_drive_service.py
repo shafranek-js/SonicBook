@@ -574,13 +574,19 @@ async def list_google_drive_library_files_cached(folder_id: str = "", force_refr
 
 
 async def _download_drive_file_to_path(client: httpx.AsyncClient, file_id: str, destination_path: str):
-    response = await client.get(
+    request = client.build_request(
+        "GET",
         f"https://www.googleapis.com/drive/v3/files/{file_id}",
         params={"alt": "media", "supportsAllDrives": "true"},
     )
+    response = await client.send(request, stream=True)
     response.raise_for_status()
-    async with aiofiles.open(destination_path, "wb") as f:
-        await f.write(response.content)
+    try:
+        async with aiofiles.open(destination_path, "wb") as f:
+            async for chunk in response.aiter_bytes(chunk_size=1048576):
+                await f.write(chunk)
+    finally:
+        await response.aclose()
     return destination_path
 
 
