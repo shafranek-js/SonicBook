@@ -15,103 +15,74 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
         -   `/api/download`: Starts a background download task.
         -   `/api/progress/{task_id}`: Returns the latest persisted task snapshot.
         -   `/api/progress/stream/{task_id}`: Streams download/assembly progress over SSE.
-        -   `/api/files/{file_name:path}`: Streams audio files (supports `Range` requests and subdirectories for ZIPs).
+        -   `/api/files/{file_name:path}`: Streams audio files (supports `Range` requests and subdirectories for ZIPs) via optimized `aiofiles` and asynchronous generators.
         -   `/api/library`: Lists all local downloads.
-        -   `/api/metadata/{file_name}`: Fetches chapter metadata JSON. For ZIP archives, this endpoint automatically extracts the contents into a hidden `.extracted_{base_name}` folder on-demand, allowing the player to sequentially stream the individual audio files directly from the archive.
-        -   `/api/settings/choose_folder`: Opens a native folder selection dialog.
+        -   `/api/metadata/{file_name}`: Fetches chapter metadata JSON via threaded I/O. For ZIP archives, extracts contents into `.extracted_{base_name}` securely.
+        -   `/api/settings/choose_folder`: Opens a native folder selection dialog (fully isolated in a safe, non-blocking subprocess).
     -   Maintains an in-memory `progress_store` with timestamp refresh on active writes so long-running jobs are not evicted mid-download.
     -   Runs a background `cleanup_task` within the FastAPI `lifespan`.
-    -   Validates incoming book URLs and hardens file-path resolution for Windows absolute / UNC path traversal cases.
 
 -   **`scraper.py` (Metadata Extraction):**
     -   Uses `httpx[http2]` + `BeautifulSoup4` for high-speed parsing.
     -   **Multi-layout support:** Optimized to handle various `akniga.org` page templates (standard and legacy).
-    -   Falls back to **Playwright (Chromium)** for JS-heavy sites or when direct parsing fails.
+    -   Falls back to **Playwright (Chromium)** for JS-heavy sites, incorporating an independent self-healing context pool to recover gracefully from browser crashes or external process termination.
 
 -   **`processor.py` (The Heavy Lifter):**
-    -   Handles downloading via `yt_dlp` Python API in a separate thread.
+    -   Handles downloading via `yt_dlp` Python API. Concurrency is decoupled and independently configurable via the `YTDLP_CONCURRENCY` environment variable to prevent IP bans.
     -   Provides real-time, throttled progress updates to the frontend.
     -   Assembles final files (`.m4b`, `.mp3`, or `.zip`) using FFmpeg.
-    -   **Validation:** Ensures metadata integrity (e.g., non-zero chapter durations) to prevent FFmpeg assembly failures.
     -   Generates a sidecar `.json` metadata file for each book to enable player navigation.
 
 -   **`config.py` (Configuration):**
     -   Dynamic paths loaded from `settings.json`.
-    -   System-level FFmpeg/FFprobe path management via PATH or `FFMPEG_PATH` / `FFPROBE_PATH`.
-    -   Root-level `.env` support for local overrides, including Google Drive OAuth credentials.
+    -   System-level FFmpeg/FFprobe path management.
+    -   Concurrency settings for sub-processes.
+    -   Root-level `.env` support for local overrides.
 
 -   **`google_drive_service.py` (Google Drive Integration):**
-    -   Handles Google OAuth URL generation, callback exchange, token refresh, disconnect, and connection status.
-    -   Lists supported audiobook files from a configured Drive folder.
-    -   Imports selected Drive files into the local SonicBook library through the existing staging flow.
-    -   Provides backend-proxied metadata and `Range`-aware streaming for Drive-hosted audio playback.
+    -   Handles Google OAuth token exchange and callback status.
+    -   Lists supported audiobooks and proxy-streams media via chunked, buffered `aiofiles` threads to eliminate event-loop starvation during intensive network reads.
+
+-   **`bookmark_service.py` (Persistence & State Tracking):**
+    -   Synchronizes playback metadata, last active sessions, and `duration` checkpoints.
+    -   Operates a rapid In-Memory dictionary cache (`_state_cache`), preventing blocking disk operations on every partial SSE frame update during media playback.
 
 -   **`index.html` + `static/app.js` + `static/style.css` (Frontend):**
-    -   **Symmetric Sliding Panels:** A unique 3-panel layout.
-        -   **Left Panel:** Sliding Library to browse and launch books. Handles play/pause toggling, per-book progress visualization, and auto-opens the chapters panel when metadata exists.
-        -   **Center Card:** Main download interface and playback controls with a compact toolbar-first layout.
-        -   **Right Panel:** Sliding Table of Contents (Chapters).
-    -   **Interactive Player:** Custom UI with:
-        -   Timeline with bright, accurate chapter markers (rendered post-load).
-        -   **Visual Chapter Progress:** Background fills in the side panel showing elapsed time within each chapter.
-        -   **Dynamic Timers:** Shows current position vs. total length for the active chapter.
-        -   **Interactive Seeking:** Jump to any position in a chapter by clicking its item in the side panel.
-        -   **Keyboard Shortcuts:** Space toggles play/pause, Left/Right seek by 15 seconds.
-        -   **Media Session Integration:** Exposes title/cover metadata and play/pause/seek handlers to OS-level media controls.
-        -   **Local Cover Display:** Uses downloaded local artwork in the player when available.
-        -   **Adaptive Cover Sizing:** Expands artwork to the player width, then dynamically reduces max-height only when needed to keep the center panel fully visible in the current window geometry.
-        -   **Blur-Backed Cover Frame:** Uses the same image as a blurred background layer behind tall covers so side gaps are visually filled without cropping or distorting the main artwork.
-        -   **Standard Media Controls:** Transport buttons now use standard media-style icons and state handling instead of emoji text toggles, and the chapter button shares the same visual language.
-    -   **Smart Bookmarking & Persistence:** 
-        -   Saves `currentTime`, `duration`, and `trackIndex` (for ZIPs) to `localStorage`.
-        -   Persists UI state (open panels, current mode, last played book) across page reloads.
-    -   **Full i18n & Theming:** Reliable English and Russian support with dynamic UI updates and Dark/Light mode.
-    -   **Google Drive Settings & Library Source Toggle:**
-        -   Settings now expose Google Drive connection state, connect/disconnect actions, and a configurable folder ID.
-        -   The library panel can switch between `Local` and `Drive`.
-        -   Drive items can be imported into the local library and, for supported formats, streamed directly through backend proxy endpoints.
+    -   **Symmetric Sliding Panels:** A dynamic 3-panel layout.
+    -   **Interactive Player:** Media Session integrations, interactive seeking, variable playback rates, and keyboard shortcuts.
+    -   **Adaptive Cover Sizing:** Blur-backed frames ensuring tall covers never cause vertical UI overflow.
+    -   **Settings:** Drive configurations and Source Toggles completely native to the client interface.
 
--   **`recover_metadata.py` (Utility):**
-    -   Retroactively generates or "repairs" JSON metadata for legacy or incomplete downloads using `ffprobe`.
-
--   **`backfill_covers.py` + `cover_aliases.json` (Utilities):**
-    -   Retroactively downloads missing covers for existing library items.
-    -   Supports manual aliases and direct `source_url` overrides for ambiguous titles.
-    -   Prefers source-page artwork when known, then ranks fallback candidates by title/author match and real image dimensions.
+-   **`recover_metadata.py` & `backfill_covers.py` (Utilities):**
+    -   Retroactively repair collections locally, strictly relying on asynchronous disk writes (`aiofiles`) to maintain high ingestion speeds without starving the OS.
 
 ---
 
 ## 2. System Requirements & Setup
 
-1.  **Python 3.10+**
+1.  **Python 3.10+** (Recommend 3.11 for improved async stack performance).
 2.  **FFmpeg & FFprobe**: Must be in PATH or exposed via `FFMPEG_PATH` / `FFPROBE_PATH`.
-3.  **Playwright Browsers**: `playwright install chromium`
-4.  **Google Drive OAuth Credentials** (optional for Drive features): `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, and an allowed redirect URI such as `http://127.0.0.1:8000/api/google-drive/auth/callback`
+3.  **Playwright Browsers**: Run `playwright install chromium` prior to usage.
+4.  **Google Drive API** (optional): Setup OAuth strings via internal settings menu or `.env`.
 
 ---
 
 ## 3. Current State of the Codebase
 
-SonicBook is now a robust, feature-complete audiobook management system.
+SonicBook is currently in a hyper-optimized and heavily fortified state following a comprehensive architectural and stability sprint (April 2026).
 
-### Recent Feature Highlights:
-*   **Fully Persistent UI:** Page reloads no longer interrupt the experience; panels and player state are remembered.
-*   **Interactive Side Panels:** Clickable headers, smooth drawer animations, and real-time synchronization between the library list and the main player.
-*   **Automatic Chapter Panel Opening:** Selecting a book from the library now opens the right-side chapter panel automatically when metadata is available.
-*   **Compact Center Layout:** The middle panel now uses a denser spacing system, toolbar-mounted save-path control, and no redundant hero text.
-*   **Adaptive Player Covers:** Cover art now fills the player width, auto-constrains height to avoid center-panel scrolling, and uses a blurred backdrop layer to fill side gaps on tall artwork.
-*   **Unified Progress Styling:** Library progress fills and chapter progress fills now share the same primary-color translucent treatment.
-*   **Player Polish:** Keyboard shortcuts, Media Session support, local cover rendering, standard media-style controls, and automatic chapter-aware library playback are all wired into the current UI.
-*   **Cover Backfill Workflow:** Existing libraries can be enriched after the fact using `backfill_covers.py` and curated `cover_aliases.json` source mappings.
-*   **Google Drive Workflow:** Remote Drive folders can now be connected from the app, browsed as a second library source, imported into the local library, and streamed for supported formats.
-*   **Robust Scraping:** Improved reliability for diverse source layouts and a retroactive metadata recovery tool.
-*   **Polished UX:** Custom indigo scrollbars, white timeline markers, and comprehensive Russian localization.
+### Recent Backend Stability & Architecture Highlights:
+*   **Asynchronous I/O Nirvana:** Transitioned entirely from synchronous Python `open()` calls to `aiofiles` and `asyncio.to_thread`. Drive streams, chunked uploads, and massive 1GB+ fragmented M3U8 downloads no longer stall FastAPI.
+*   **Playwright Resurrection:** Scraper initialization is now fault-tolerant. Chromium instances natively heal themselves and attempt transparent reloads should the underlying browser process be killed externally.
+*   **Threaded Process Isolation:** `Tkinter` (used for selecting paths in the UI) was famously deadlocking the Python ThreadPool due to Apple/Windows GUI thread violations. The folder dialogs have been entirely decoupled into an external `subprocess`, resolving all UI freezing.
+*   **Rapid Bookmark Caching:** Massive reduction in hardware I/O latency; bookmark writes dynamically cache into memory upon parsing and flush to filesystem lazily, accommodating multi-tab high-traffic frontend synchronizations seamlessly.
+*   **Tackled ZipSlip:** Ensured all extracted archive paths strictly adhere to bounded resolution rules, neutralizing Zip Slip directory traversal vulnerabilities.
+*   **Extensive Test Suite Coverage:** Wove a dense net of `IsolatedAsyncioTestCase` units over processing logic, download headers, archive isolation schemas, and bookmark migrations. 
 
 ### Areas for Future Improvement / Technical Debt:
-1.  **Playwright Persistence:** Managing a browser context pool within `lifespan`.
-2.  **Error Feedback:** More detailed error states in the UI for scraper or download failures.
-3.  **Cover Backfill Ergonomics:** Optional in-app trigger or admin endpoint for running cover backfill without a separate script invocation.
-4.  **Google Drive Validation:** Live end-to-end testing still depends on real Google OAuth credentials being configured locally; current code-level and route-level validation is complete, but real OAuth/import/stream smoke tests remain pending until credentials are supplied.
+1.  **Live Drive Validation:** E2E live Drive integration rests primarily on staging; live QA validation is deferred to real credential injection mapping runs. 
+2.  **WebSockets:** Although SSE functions flawlessly, shifting progress endpoints and dynamic client connections (Drive notifications) to Native WebSockets presents a natural evolutionary path for the architecture.
+3.  **Advanced Chapter Detection:** FFprobe heuristics currently rely on well-defined embedded markers. Exploring Deep-Learning VAD (Voice Activity Detection) integrations for auto-splitting trackless monolith audio files could heavily bolster the application's unique value offering.
 
 ---
-*Document updated on 18 March 2026.*
+*Document updated on 16 April 2026.*
