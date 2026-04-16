@@ -30,5 +30,43 @@ class TestZipService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.exception.status_code, 500)
         self.assertEqual(context.exception.detail, "Failed to extract ZIP for playback")
 
+    @patch("zip_service.zipfile.ZipFile")
+    def test_extract_zip_archive_malicious_path(self, mock_zipfile):
+        # Setup mock archive with a malicious member
+        mock_archive = mock_zipfile.return_value.__enter__.return_value
+
+        class MockZipInfo:
+            def __init__(self, filename):
+                self.filename = filename
+
+        mock_archive.infolist.return_value = [
+            MockZipInfo("safe_file.txt"),
+            MockZipInfo("../malicious.txt")
+        ]
+
+        with self.assertRaises(ValueError) as context:
+            zip_service.extract_zip_archive("dummy.zip", "/path/to/extracted_dummy")
+
+        self.assertIn("Malicious member path detected: ../malicious.txt", str(context.exception))
+
+    @patch("zip_service.zipfile.ZipFile")
+    def test_extract_zip_archive_success(self, mock_zipfile):
+        # Setup mock archive with safe members
+        mock_archive = mock_zipfile.return_value.__enter__.return_value
+
+        class MockZipInfo:
+            def __init__(self, filename):
+                self.filename = filename
+
+        mock_archive.infolist.return_value = [
+            MockZipInfo("safe_file.txt"),
+            MockZipInfo("dir/another_safe_file.txt")
+        ]
+
+        zip_service.extract_zip_archive("dummy.zip", "/path/to/extracted_dummy")
+
+        mock_archive.extractall.assert_called_once_with("/path/to/extracted_dummy")
+
+
 if __name__ == '__main__':
     unittest.main()
