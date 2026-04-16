@@ -657,7 +657,7 @@ async def get_metadata(file_name: str):
         try:
             async with aiofiles.open(json_path, "r", encoding="utf-8") as f:
                 content = await f.read()
-                payload = json.loads(content)
+                payload = await asyncio.to_thread(json.loads, content)
             if isinstance(payload, dict):
                 size_bytes = await asyncio.to_thread(os.path.getsize, file_path)
                 payload["book_id"] = bookmark_service.build_book_id(file_name, size_bytes=size_bytes, metadata=payload)
