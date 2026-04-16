@@ -151,6 +151,41 @@ class TestProgressService(unittest.TestCase):
         tid2, data2 = progress_service.find_active_task_by_source(url)
         self.assertEqual(data2["status"], "downloading")
         self.assertEqual(data2["nested"]["a"], 1)
+    def test_get_progress_cache_poisoning(self):
+        task_id = "test-1"
+        payload = {"status": "searching", "percent": 10.0}
+        progress_service.set_progress(task_id, payload)
+
+        result = progress_service.get_progress(task_id)
+        result["percent"] = 99.0  # Attempt to poison the cache
+
+        cached_result = progress_service.get_progress(task_id)
+        self.assertEqual(cached_result["percent"], 10.0, "Cache was poisoned!")
+
+    def test_update_progress_entry_cache_poisoning(self):
+        task_id = "test-2"
+        payload = {"status": "searching", "percent": 10.0}
+        progress_service.set_progress(task_id, payload)
+
+        result = progress_service.update_progress_entry(task_id, percent=20.0)
+        self.assertEqual(result["percent"], 20.0)
+
+        result["percent"] = 99.0  # Attempt to poison the cache
+
+        cached_result = progress_service.get_progress(task_id)
+        self.assertEqual(cached_result["percent"], 20.0, "Cache was poisoned!")
+
+    def test_find_active_task_by_source_cache_poisoning(self):
+        task_id = "test-3"
+        url = "http://poison.com"
+        payload = {"status": "searching", "percent": 10.0, "source_url": url}
+        progress_service.set_progress(task_id, payload)
+
+        tid, data = progress_service.find_active_task_by_source(url)
+        data["percent"] = 99.0  # Attempt to poison the cache
+
+        cached_result = progress_service.get_progress(task_id)
+        self.assertEqual(cached_result["percent"], 10.0, "Cache was poisoned!")
 
 if __name__ == "__main__":
     unittest.main()

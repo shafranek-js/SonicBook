@@ -20,10 +20,8 @@ def create_progress_entry(source_url: str = "", mode: str = "") -> dict:
 
 
 def get_progress(task_id: str) -> dict:
-    result = progress_store.get(task_id)
-    if result is None:
-        return {"status": "not_found"}
-    return copy.deepcopy(result)
+    entry = progress_store.get(task_id, {"status": "not_found"})
+    return copy.deepcopy(entry)
 
 
 def set_progress(task_id: str, payload: dict):
