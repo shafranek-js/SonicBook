@@ -74,6 +74,28 @@ class TestBookmarkService(unittest.TestCase):
         self.assertIn("book:file:test book", aliases)
         self.assertIn("book:test book", aliases)
 
+    def test_build_book_id_aliases_empty(self):
+        self.assertEqual(bookmark_service.build_book_id_aliases(), [])
+        self.assertEqual(bookmark_service.build_book_id_aliases(name="", size_bytes=None, metadata={}, book_id=""), [])
+        self.assertEqual(bookmark_service.build_book_id_aliases(name=None, size_bytes=0, metadata=None, book_id=None), [])
+
+    def test_build_book_id_aliases_only_name(self):
+        aliases = bookmark_service.build_book_id_aliases(name="Test Book")
+        self.assertEqual(aliases, ['book:file:test book', 'book:test book'])
+
+    def test_build_book_id_aliases_name_and_size(self):
+        aliases = bookmark_service.build_book_id_aliases(name="Test Book", size_bytes=1024)
+        self.assertEqual(aliases, ['book:file:test book:1024', 'book:test book', 'book:file:test book'])
+
+    def test_build_book_id_aliases_metadata(self):
+        aliases = bookmark_service.build_book_id_aliases(metadata={"file_name": "metadata_book"})
+        self.assertEqual(aliases, ['book:file:metadata_book', 'book:metadata_book'])
+
+    def test_build_book_id_aliases_deduplication(self):
+        # Passing name="Test Book" and also a matching book_id generates identical legacy aliases that should be deduped
+        aliases = bookmark_service.build_book_id_aliases(name="Test Book", book_id="book:file:test book:1024")
+        self.assertEqual(aliases, ['book:file:test book:1024', 'book:test book', 'book:file:test book'])
+
     def test_profile_storage_slug(self):
         slug1 = bookmark_service._profile_storage_slug("test_profile")
         slug2 = bookmark_service._profile_storage_slug("Test_Profile ")
