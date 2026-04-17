@@ -265,6 +265,36 @@ async def fetch_cover_from_source_url(source_url: str) -> str | None:
     return cover_url
 
 
+async def _process_akniga_link(item: dict, seen: set, titles: list[str], authors: list[str]) -> dict | None:
+    href = item.get("href")
+    if not href:
+        return None
+    if not href.startswith("http"):
+        href = "https://akniga.org" + href
+    if href in seen:
+        return None
+    seen.add(href)
+
+    cover_url = await fetch_cover_from_source_url(href)
+    if not cover_url:
+        return None
+
+    title_match = title_score(item.get("text", ""), titles)
+    author_match = best_author_score(item.get("text", ""), authors)
+    if not is_viable_match(title_match, author_match):
+        return None
+
+    score = title_match + author_match
+    return {
+        "source": "akniga",
+        "title": item.get("text", ""),
+        "authors": [],
+        "score": score,
+        "size_name": "page",
+        "url": cover_url,
+    }
+
+
 async def search_akniga_candidates(titles: list[str], authors: list[str]) -> list[dict]:
     if not scraper.browser_instance:
         await scraper.init_browser()
@@ -289,34 +319,51 @@ async def search_akniga_candidates(titles: list[str], authors: list[str]) -> lis
                 }))""",
             )
             for item in links:
-                href = item.get("href")
-                if not href:
-                    continue
-                if not href.startswith("http"):
-                    href = "https://akniga.org" + href
-                if href in seen:
-                    continue
-                seen.add(href)
-                cover_url = await fetch_cover_from_source_url(href)
-                if cover_url:
-                    title_match = title_score(item.get("text", ""), titles)
-                    author_match = best_author_score(item.get("text", ""), authors)
-                    if not is_viable_match(title_match, author_match):
-                        continue
-                    score = title_match + author_match
-                    candidates.append({
-                        "source": "akniga",
-                        "title": item.get("text", ""),
-                        "authors": [],
-                        "score": score,
-                        "size_name": "page",
-                        "url": cover_url,
-                    })
+                candidate = await _process_akniga_link(item, seen, titles, authors)
+                if candidate:
+                    candidates.append(candidate)
         except Exception:
             continue
         finally:
             await page.close()
 
+    return candidates
+
+
+def _process_open_library_doc(doc: dict, seen: set, titles: list[str], authors: list[str]) -> list[dict]:
+    doc_title = doc.get("title", "")
+    doc_authors = doc.get("author_name", [])
+    title_match = title_score(doc_title, titles)
+    author_match = best_author_score(doc_authors, authors)
+
+    if not is_viable_match(title_match, author_match):
+        return []
+
+    score = title_match + author_match
+    cover_id = doc.get("cover_i")
+    cover_olid = doc.get("cover_edition_key")
+    edition_keys = doc.get("edition_key") or []
+    if not cover_olid and edition_keys:
+        cover_olid = edition_keys[0]
+
+    candidates = []
+    for size_name in ("L", "M", "S"):
+        url = None
+        if cover_olid:
+            url = f"https://covers.openlibrary.org/b/olid/{cover_olid}-{size_name}.jpg"
+        elif cover_id:
+            url = f"https://covers.openlibrary.org/b/id/{cover_id}-{size_name}.jpg"
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        candidates.append({
+            "source": "open_library",
+            "title": doc_title,
+            "authors": doc_authors,
+            "score": score,
+            "size_name": size_name,
+            "url": url,
+        })
     return candidates
 
 
@@ -333,38 +380,36 @@ async def search_open_library_candidates(titles: list[str], authors: list[str]) 
                 continue
             payload = response.json()
             for doc in payload.get("docs") or []:
-                doc_title = doc.get("title", "")
-                doc_authors = doc.get("author_name", [])
-                title_match = title_score(doc_title, titles)
-                author_match = best_author_score(doc_authors, authors)
-                if not is_viable_match(title_match, author_match):
-                    continue
-                score = title_match + author_match
-
-                cover_id = doc.get("cover_i")
-                cover_olid = doc.get("cover_edition_key")
-                edition_keys = doc.get("edition_key") or []
-                if not cover_olid and edition_keys:
-                    cover_olid = edition_keys[0]
-
-                for size_name in ("L", "M", "S"):
-                    url = None
-                    if cover_olid:
-                        url = f"https://covers.openlibrary.org/b/olid/{cover_olid}-{size_name}.jpg"
-                    elif cover_id:
-                        url = f"https://covers.openlibrary.org/b/id/{cover_id}-{size_name}.jpg"
-                    if not url or url in seen:
-                        continue
-                    seen.add(url)
-                    candidates.append({
-                        "source": "open_library",
-                        "title": doc_title,
-                        "authors": doc_authors,
-                        "score": score,
-                        "size_name": size_name,
-                        "url": url,
-                    })
+                candidates.extend(_process_open_library_doc(doc, seen, titles, authors))
         return candidates
+
+
+def _process_google_books_item(item: dict, seen: set, titles: list[str], authors: list[str]) -> list[dict]:
+    info = item.get("volumeInfo") or {}
+    book_title = info.get("title", "")
+    book_authors = info.get("authors", [])
+    image_links = info.get("imageLinks") or {}
+    title_match = title_score(book_title, titles)
+    author_match = best_author_score(book_authors, authors)
+    if not is_viable_match(title_match, author_match):
+        return []
+    score = title_match + author_match
+
+    candidates = []
+    for size_name in ("extraLarge", "large", "medium", "small", "thumbnail", "smallThumbnail"):
+        url = image_links.get(size_name)
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        candidates.append({
+            "source": "google_books",
+            "title": book_title,
+            "authors": book_authors,
+            "score": score,
+            "size_name": size_name,
+            "url": url,
+        })
+    return candidates
 
 
 async def search_google_books_candidates(titles: list[str], authors: list[str]) -> list[dict]:
@@ -392,29 +437,7 @@ async def search_google_books_candidates(titles: list[str], authors: list[str]) 
 
             payload = response.json()
             for item in payload.get("items") or []:
-                info = item.get("volumeInfo") or {}
-                book_title = info.get("title", "")
-                book_authors = info.get("authors", [])
-                image_links = info.get("imageLinks") or {}
-                title_match = title_score(book_title, titles)
-                author_match = best_author_score(book_authors, authors)
-                if not is_viable_match(title_match, author_match):
-                    continue
-                score = title_match + author_match
-
-                for size_name in ("extraLarge", "large", "medium", "small", "thumbnail", "smallThumbnail"):
-                    url = image_links.get(size_name)
-                    if not url or url in seen:
-                        continue
-                    seen.add(url)
-                    candidates.append({
-                        "source": "google_books",
-                        "title": book_title,
-                        "authors": book_authors,
-                        "score": score,
-                        "size_name": size_name,
-                        "url": url,
-                    })
+                candidates.extend(_process_google_books_item(item, seen, titles, authors))
         return candidates
 
 
