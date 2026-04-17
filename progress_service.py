@@ -33,7 +33,7 @@ def update_progress_entry(task_id: str, **fields):
     if entry is None:
         return None
 
-    entry.update(fields)
+    entry.update(copy.deepcopy(fields))
     entry["timestamp"] = time.time()
     return copy.deepcopy(entry)
 
