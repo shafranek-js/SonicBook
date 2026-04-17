@@ -114,11 +114,12 @@ def is_viable_match(title_match: int, author_match: int) -> bool:
     return False
 
 
-def load_aliases() -> dict:
-    if not os.path.exists(ALIASES_FILE):
+async def load_aliases() -> dict:
+    if not await asyncio.to_thread(os.path.exists, ALIASES_FILE):
         return {}
-    with open(ALIASES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    async with aiofiles.open(ALIASES_FILE, "r", encoding="utf-8") as f:
+        content = await f.read()
+        return await asyncio.to_thread(json.loads, content)
 
 
 def alias_entry_for(file_name: str, metadata: dict, aliases: dict) -> dict:
@@ -564,7 +565,7 @@ async def process_file(file_name: str, aliases: dict) -> dict:
 
 
 async def main():
-    aliases = load_aliases()
+    aliases = await load_aliases()
     results = []
     await scraper.init_browser()
     try:
