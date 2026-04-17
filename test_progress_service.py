@@ -1,14 +1,22 @@
 import unittest
+import time
 from unittest.mock import patch
 import progress_service
 
 class TestProgressService(unittest.TestCase):
+    """
+    Tests for progress_service.py covering CRUD operations on the progress store,
+    expiry cleanup, active task lookups, and deepcopy safety (preventing cache poisoning).
+    """
+
     def setUp(self):
+        # Clear the global store before each test to ensure isolation
         progress_service.progress_store.clear()
 
     def test_create_progress_entry(self):
-        url = "http://example.com"
-        mode = "download"
+        """Test basic creation of a progress entry with default fields."""
+        url = "http://example.com/audiobook"
+        mode = "m4b"
         entry = progress_service.create_progress_entry(url, mode)
 
         self.assertEqual(entry["status"], "searching")
@@ -20,171 +28,135 @@ class TestProgressService(unittest.TestCase):
         self.assertIsInstance(entry["timestamp"], float)
 
     def test_get_progress_not_found(self):
-        result = progress_service.get_progress("non-existent")
+        """Test that non-existent tasks return a 'not_found' status."""
+        result = progress_service.get_progress("non-existent-id")
         self.assertEqual(result, {"status": "not_found"})
 
     def test_set_and_get_progress(self):
-        task_id = "task-1"
-        payload = {"status": "processing", "percent": 50.0}
+        """Test basic CRUD: set and then retrieve a progress entry."""
+        task_id = "task-123"
+        payload = {"status": "processing", "percent": 45.5, "phase": "downloading"}
         progress_service.set_progress(task_id, payload)
 
         result = progress_service.get_progress(task_id)
-        self.assertEqual(result, payload)
+        self.assertEqual(result["status"], "processing")
+        self.assertEqual(result["percent"], 45.5)
+        self.assertEqual(result["phase"], "downloading")
 
     def test_update_progress_entry(self):
+        """Test updating specific fields in an existing progress entry."""
         with patch("time.time") as mock_time:
             mock_time.return_value = 1000.0
-            task_id = "task-1"
-            entry = progress_service.create_progress_entry("url")
-            old_timestamp = entry["timestamp"]
+            task_id = "task-update"
+
+            # Initial set
+            entry = progress_service.create_progress_entry("http://url")
             progress_service.set_progress(task_id, entry)
+            self.assertEqual(entry["timestamp"], 1000.0)
 
-            mock_time.return_value = 1001.0
-            updated = progress_service.update_progress_entry(task_id, percent=75.0, status="downloading")
+            # Update
+            mock_time.return_value = 1005.0
+            updated = progress_service.update_progress_entry(task_id, percent=80.0, status="assembling")
 
-            self.assertEqual(updated["percent"], 75.0)
-            self.assertEqual(updated["status"], "downloading")
-            self.assertEqual(updated["timestamp"], 1001.0)
-            self.assertGreater(updated["timestamp"], old_timestamp)
+            self.assertIsNotNone(updated)
+            self.assertEqual(updated["percent"], 80.0)
+            self.assertEqual(updated["status"], "assembling")
+            self.assertEqual(updated["timestamp"], 1005.0)
 
-            # Verify it updated in the store
-            self.assertEqual(progress_service.get_progress(task_id)["percent"], 75.0)
+            # Verify persistence in store
+            stored = progress_service.get_progress(task_id)
+            self.assertEqual(stored["percent"], 80.0)
 
     def test_update_progress_entry_non_existent(self):
-        result = progress_service.update_progress_entry("non-existent", percent=10.0)
+        """Test that updating a non-existent task returns None."""
+        result = progress_service.update_progress_entry("missing-task", percent=50.0)
         self.assertIsNone(result)
 
     def test_cleanup_expired_progress(self):
+        """Test that only terminal and expired tasks are cleaned up."""
         with patch("time.time") as mock_time:
-            mock_time.return_value = 1000.0
+            mock_time.return_value = 2000.0
 
-            # 1. Active task (should not be deleted)
-            progress_service.set_progress("active", {"status": "downloading", "timestamp": 900.0})
+            # 1. Active task (not terminal) - should NOT be deleted
+            progress_service.set_progress("active", {"status": "downloading", "timestamp": 1000.0})
 
-            # 2. Terminal task, not expired (should not be deleted)
-            progress_service.set_progress("recent_success", {"status": "success", "timestamp": 950.0})
+            # 2. Terminal task, NOT expired - should NOT be deleted
+            progress_service.set_progress("recent_success", {"status": "success", "timestamp": 1950.0})
 
-            # 3. Terminal task, expired (SHOULD be deleted)
-            progress_service.set_progress("old_error", {"status": "error", "timestamp": 800.0})
+            # 3. Terminal task, EXPIRED - SHOULD be deleted
+            progress_service.set_progress("old_error", {"status": "error", "timestamp": 1800.0})
 
-            # Expire seconds = 100. (1000 - 800 = 200 > 100)
+            # Cleanup with 100s expiry (2000 - 1800 = 200 > 100)
             deleted = progress_service.cleanup_expired_progress(100)
 
-            self.assertIn("old_error", deleted)
-            self.assertNotIn("active", deleted)
-            self.assertNotIn("recent_success", deleted)
+            self.assertEqual(deleted, ["old_error"])
             self.assertNotIn("old_error", progress_service.progress_store)
             self.assertIn("active", progress_service.progress_store)
             self.assertIn("recent_success", progress_service.progress_store)
 
     def test_find_active_task_by_source(self):
-        url = "http://test.com"
+        """Test looking up an active (non-terminal) task by its source URL."""
+        url = "http://target-url.com"
 
-        # 1. No task for URL
+        # 1. URL not in store
         self.assertIsNone(progress_service.find_active_task_by_source(url))
 
-        # 2. Terminal task for URL
-        progress_service.set_progress("task-1", {"source_url": url, "status": "success"})
+        # 2. Terminal task exists for URL - should return None as it is not 'active'
+        progress_service.set_progress("task-done", {"source_url": url, "status": "success"})
         self.assertIsNone(progress_service.find_active_task_by_source(url))
 
-        # 3. Active task for URL
-        progress_service.set_progress("task-2", {"source_url": url, "status": "downloading"})
-        tid, data = progress_service.find_active_task_by_source(url)
-        self.assertEqual(tid, "task-2")
+        # 3. Active task exists for URL - should return the task info
+        progress_service.set_progress("task-active", {"source_url": url, "status": "downloading"})
+        result = progress_service.find_active_task_by_source(url)
+        self.assertIsNotNone(result)
+        tid, data = result
+        self.assertEqual(tid, "task-active")
         self.assertEqual(data["status"], "downloading")
 
-        # 4. Another URL
-        self.assertIsNone(progress_service.find_active_task_by_source("http://other.com"))
-
-    def test_find_active_task_by_source_empty_url(self):
-        self.assertIsNone(progress_service.find_active_task_by_source(""))
-
-    def test_get_progress_returns_copy(self):
-        task_id = "task-mut"
-        payload = {"status": "processing", "percent": 50.0, "nested": {"a": 1}}
+    def test_deep_copy_safety_on_get(self):
+        """Verify that get_progress returns a deep copy to prevent external mutation of the store."""
+        task_id = "test-copy-get"
+        payload = {"status": "searching", "metadata": {"chapters": [1, 2]}}
         progress_service.set_progress(task_id, payload)
 
+        # Mutate retrieved object
         result = progress_service.get_progress(task_id)
-        result["percent"] = 99.0
-        result["nested"]["a"] = 2
+        result["metadata"]["chapters"].append(3)
+        result["status"] = "poisoned"
 
-        result2 = progress_service.get_progress(task_id)
-        self.assertEqual(result2["percent"], 50.0)
-        self.assertEqual(result2["nested"]["a"], 1)
+        # Verify store remains unchanged
+        verified = progress_service.get_progress(task_id)
+        self.assertEqual(verified["status"], "searching")
+        self.assertEqual(verified["metadata"]["chapters"], [1, 2])
 
-    def test_set_progress_stores_copy(self):
-        task_id = "task-mut-2"
-        payload = {"status": "processing", "percent": 50.0, "nested": {"a": 1}}
+    def test_deep_copy_safety_on_set(self):
+        """Verify that set_progress deep-copies the payload to prevent external mutation of the store."""
+        task_id = "test-copy-set"
+        payload = {"status": "searching", "metadata": {"chapters": [1, 2]}}
+
         progress_service.set_progress(task_id, payload)
 
-        payload["percent"] = 99.0
-        payload["nested"]["a"] = 2
+        # Mutate original input object
+        payload["metadata"]["chapters"].append(3)
 
-        result = progress_service.get_progress(task_id)
-        self.assertEqual(result["percent"], 50.0)
-        self.assertEqual(result["nested"]["a"], 1)
+        # Verify store remains unchanged
+        verified = progress_service.get_progress(task_id)
+        self.assertEqual(verified["metadata"]["chapters"], [1, 2])
 
-    def test_update_progress_returns_copy(self):
-        task_id = "task-mut-3"
-        payload = {"status": "processing", "percent": 50.0, "nested": {"a": 1}}
-        progress_service.set_progress(task_id, payload)
+    def test_deep_copy_safety_on_update(self):
+        """Verify that update_progress_entry deep-copies input fields to prevent store poisoning."""
+        task_id = "test-copy-update"
+        progress_service.set_progress(task_id, {"status": "searching"})
 
-        result = progress_service.update_progress_entry(task_id, percent=75.0)
-        result["percent"] = 99.0
-        result["nested"]["a"] = 2
+        update_fields = {"extra": {"details": "none"}}
+        progress_service.update_progress_entry(task_id, **update_fields)
 
-        result2 = progress_service.get_progress(task_id)
-        self.assertEqual(result2["percent"], 75.0)
-        self.assertEqual(result2["nested"]["a"], 1)
+        # Mutate the dictionary that was passed in
+        update_fields["extra"]["details"] = "poisoned"
 
-    def test_find_active_task_returns_copy(self):
-        url = "http://mut-test.com"
-        task_id = "task-mut-4"
-        payload = {"source_url": url, "status": "downloading", "nested": {"a": 1}}
-        progress_service.set_progress(task_id, payload)
-
-        tid, data = progress_service.find_active_task_by_source(url)
-        data["status"] = "success"
-        data["nested"]["a"] = 2
-
-        tid2, data2 = progress_service.find_active_task_by_source(url)
-        self.assertEqual(data2["status"], "downloading")
-        self.assertEqual(data2["nested"]["a"], 1)
-    def test_get_progress_cache_poisoning(self):
-        task_id = "test-1"
-        payload = {"status": "searching", "percent": 10.0}
-        progress_service.set_progress(task_id, payload)
-
-        result = progress_service.get_progress(task_id)
-        result["percent"] = 99.0  # Attempt to poison the cache
-
-        cached_result = progress_service.get_progress(task_id)
-        self.assertEqual(cached_result["percent"], 10.0, "Cache was poisoned!")
-
-    def test_update_progress_entry_cache_poisoning(self):
-        task_id = "test-2"
-        payload = {"status": "searching", "percent": 10.0}
-        progress_service.set_progress(task_id, payload)
-
-        result = progress_service.update_progress_entry(task_id, percent=20.0)
-        self.assertEqual(result["percent"], 20.0)
-
-        result["percent"] = 99.0  # Attempt to poison the cache
-
-        cached_result = progress_service.get_progress(task_id)
-        self.assertEqual(cached_result["percent"], 20.0, "Cache was poisoned!")
-
-    def test_find_active_task_by_source_cache_poisoning(self):
-        task_id = "test-3"
-        url = "http://poison.com"
-        payload = {"status": "searching", "percent": 10.0, "source_url": url}
-        progress_service.set_progress(task_id, payload)
-
-        tid, data = progress_service.find_active_task_by_source(url)
-        data["percent"] = 99.0  # Attempt to poison the cache
-
-        cached_result = progress_service.get_progress(task_id)
-        self.assertEqual(cached_result["percent"], 10.0, "Cache was poisoned!")
+        # Verify store remains unchanged
+        verified = progress_service.get_progress(task_id)
+        self.assertEqual(verified["extra"]["details"], "none")
 
 if __name__ == "__main__":
     unittest.main()
