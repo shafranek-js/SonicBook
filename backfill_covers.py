@@ -62,6 +62,16 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _single_title_score(candidate: str, desired: str) -> int:
+    if candidate == desired:
+        return 100
+    if (len(desired) >= 8 or len(desired.split()) >= 2) and desired in candidate:
+        return 60
+    if (len(candidate) >= 8 or len(candidate.split()) >= 2) and candidate in desired:
+        return 40
+    return 0
+
+
 def title_score(candidate_title: str, desired_titles: list[str]) -> int:
     candidate = normalize_text(candidate_title)
     if not candidate:
@@ -72,13 +82,16 @@ def title_score(candidate_title: str, desired_titles: list[str]) -> int:
         normalized = normalize_text(desired)
         if not normalized:
             continue
-        if candidate == normalized:
-            score += 100
-        elif (len(normalized) >= 8 or len(normalized.split()) >= 2) and normalized in candidate:
-            score += 60
-        elif (len(candidate) >= 8 or len(candidate.split()) >= 2) and candidate in normalized:
-            score += 40
+        score += _single_title_score(candidate, normalized)
     return score
+
+
+def _single_author_score(candidate: str, desired: str) -> int:
+    if candidate == desired:
+        return 100
+    if desired in candidate or candidate in desired:
+        return 60
+    return 0
 
 
 def author_score(candidate_authors, desired_author: str) -> int:
@@ -94,10 +107,7 @@ def author_score(candidate_authors, desired_author: str) -> int:
         normalized = normalize_text(author)
         if not normalized:
             continue
-        if normalized == desired:
-            score += 100
-        elif desired in normalized or normalized in desired:
-            score += 60
+        score += _single_author_score(normalized, desired)
     return score
 
 
