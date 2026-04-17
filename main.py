@@ -4,6 +4,8 @@ import asyncio
 import logging
 import json
 import html
+import socket
+import ipaddress
 import mimetypes
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -126,11 +128,34 @@ def resolve_download_path(file_name: str) -> str:
 
     return candidate_path
 
-def validate_book_url(url: str) -> str:
+async def is_private_ip(hostname: str) -> bool:
+    """Check if the hostname resolves to a private, loopback, or non-global IP address."""
+    try:
+        loop = asyncio.get_running_loop()
+        # Resolve hostname to IP addresses
+        infos = await loop.getaddrinfo(hostname, None)
+        for info in infos:
+            ip_str = info[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if not ip.is_global:
+                return True
+    except Exception:
+        # If resolution fails, we don't treat it as private,
+        # the subsequent request will fail naturally.
+        return False
+    return False
+
+async def validate_book_url(url: str) -> str:
     candidate = (url or "").strip()
     parsed = urlparse(candidate)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(status_code=400, detail="Invalid book URL")
+
+    # SSRF Protection: Check if the hostname resolves to a private IP
+    if await is_private_ip(parsed.hostname):
+        logger.warning(f"Blocked request to private/internal URL: {candidate}")
+        raise HTTPException(status_code=400, detail="Invalid book URL")
+
     return candidate
 
 def should_suppress_asyncio_noise(context: dict) -> bool:
@@ -459,7 +484,7 @@ async def google_drive_stream_file(file_id: str, request: Request, resource_key:
 
 @app.post("/api/info")
 async def get_info(request: InfoRequest):
-    book_url = validate_book_url(request.url)
+    book_url = await validate_book_url(request.url)
     try:
         m3u8, title, chapters, cover = await scraper.get_book_info(book_url)
     except RuntimeError as exc:
@@ -470,7 +495,7 @@ async def get_info(request: InfoRequest):
 
 @app.post("/api/download")
 async def start_download(request: DownloadRequest, background_tasks: BackgroundTasks):
-    book_url = validate_book_url(request.url)
+    book_url = await validate_book_url(request.url)
     existing_task = progress_service.find_active_task_by_source(book_url)
     if existing_task:
         task_id, _ = existing_task
