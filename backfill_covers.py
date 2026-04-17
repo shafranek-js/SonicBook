@@ -31,24 +31,30 @@ def metadata_path_for(file_name: str) -> str:
     return os.path.join(config.DOWNLOADS_DIR, f"{base_name}.json")
 
 
-def load_metadata(file_name: str) -> dict:
+async def load_metadata(file_name: str) -> dict:
     path = metadata_path_for(file_name)
-    if not os.path.exists(path):
+    if not await asyncio.to_thread(os.path.exists, path):
         return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+
+    def _read_and_parse():
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return await asyncio.to_thread(_read_and_parse)
 
 
-def save_metadata(file_name: str, metadata: dict):
+async def save_metadata(file_name: str, metadata: dict):
     path = metadata_path_for(file_name)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+    def _serialize_and_write():
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+    await asyncio.to_thread(_serialize_and_write)
 
 
-def detect_existing_cover(base_name: str) -> str | None:
+async def detect_existing_cover(base_name: str) -> str | None:
     for ext in (".jpg", ".png", ".webp"):
         candidate = os.path.join(config.DOWNLOADS_DIR, f"{base_name}{ext}")
-        if os.path.exists(candidate):
+        if await asyncio.to_thread(os.path.exists, candidate):
             return os.path.basename(candidate)
     return None
 
@@ -479,17 +485,17 @@ async def find_cover_candidates(file_name: str, metadata: dict, aliases: dict) -
 
 async def process_file(file_name: str, aliases: dict) -> dict:
     base_name = os.path.splitext(file_name)[0]
-    metadata = load_metadata(file_name)
+    metadata = await load_metadata(file_name)
     alias_entry = alias_entry_for(file_name, metadata, aliases)
 
-    existing_cover = detect_existing_cover(base_name)
+    existing_cover = await detect_existing_cover(base_name)
     if existing_cover:
         if metadata.get("local_cover") != existing_cover:
             metadata["local_cover"] = existing_cover
             if alias_entry.get("source_url") and not metadata.get("source_url"):
                 metadata["source_url"] = alias_entry["source_url"]
             if metadata:
-                save_metadata(file_name, metadata)
+                await save_metadata(file_name, metadata)
         return {"file": file_name, "status": "already_has_cover", "cover": existing_cover}
 
     raw_candidates = await find_cover_candidates(file_name, metadata, aliases)
@@ -525,7 +531,7 @@ async def process_file(file_name: str, aliases: dict) -> dict:
         metadata["source_url"] = alias_entry["source_url"]
     metadata["cover_url"] = best["url"]
     metadata["local_cover"] = cover_file_name
-    save_metadata(file_name, metadata)
+    await save_metadata(file_name, metadata)
 
     return {
         "file": file_name,

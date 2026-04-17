@@ -32,3 +32,5 @@ debug_regex.py
 # OS
 .DS_Store
 Thumbs.db
+test_downloads/
+test_bench/
