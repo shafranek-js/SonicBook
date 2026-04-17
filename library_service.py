@@ -138,44 +138,57 @@ def _scan_library(downloads_dir: str) -> list[dict]:
     files = []
     changed = False
 
+    audio_entries = []
+    sidecar_entries = {}
+
     with os.scandir(downloads_dir) as iterator:
         for entry in iterator:
-            if not entry.is_file() or not entry.name.endswith(AUDIO_EXTENSIONS):
+            if not entry.is_file():
                 continue
+            name = entry.name
+            if name.endswith(AUDIO_EXTENSIONS):
+                audio_entries.append(entry)
+            elif name.endswith(".json"):
+                sidecar_entries[name] = entry
 
-            stat = entry.stat()
-            size_bytes = stat.st_size
-            mtime = stat.st_mtime
-            mtime_ns = stat.st_mtime_ns
-            sidecar_path = _sidecar_json_path(entry.path)
-            sidecar_mtime_ns = 0
-            if os.path.exists(sidecar_path):
-                sidecar_mtime_ns = os.stat(sidecar_path).st_mtime_ns
+    for entry in audio_entries:
+        stat = entry.stat()
+        size_bytes = stat.st_size
+        mtime = stat.st_mtime
+        mtime_ns = stat.st_mtime_ns
 
-            cached = cached_entries.get(entry.name)
-            cached_file = cached.get("file") if isinstance(cached, dict) else None
-            cache_hit = (
-                isinstance(cached, dict)
-                and isinstance(cached_file, dict)
-                and int(cached.get("size_bytes") or 0) == size_bytes
-                and int(cached.get("mtime_ns") or 0) == mtime_ns
-                and int(cached.get("sidecar_mtime_ns") or 0) == sidecar_mtime_ns
-            )
+        sidecar_path = _sidecar_json_path(entry.path)
+        sidecar_name = os.path.basename(sidecar_path)
+        sidecar_entry = sidecar_entries.get(sidecar_name)
 
-            if cache_hit:
-                file_record = dict(cached_file)
-            else:
-                sidecar_meta = load_sidecar_metadata_from_path(sidecar_path) if sidecar_mtime_ns else None
-                file_record = _build_file_record(entry.name, entry.path, size_bytes, mtime, sidecar_meta)
-                changed = True
+        sidecar_mtime_ns = 0
+        if sidecar_entry:
+            sidecar_mtime_ns = sidecar_entry.stat().st_mtime_ns
 
-            next_entries[entry.name] = {
-                "size_bytes": size_bytes,
-                "mtime_ns": mtime_ns,
-                "sidecar_mtime_ns": sidecar_mtime_ns,
-                "file": file_record,
-            }
-            files.append(file_record)
+        cached = cached_entries.get(entry.name)
+        cached_file = cached.get("file") if isinstance(cached, dict) else None
+        cache_hit = (
+            isinstance(cached, dict)
+            and isinstance(cached_file, dict)
+            and int(cached.get("size_bytes") or 0) == size_bytes
+            and int(cached.get("mtime_ns") or 0) == mtime_ns
+            and int(cached.get("sidecar_mtime_ns") or 0) == sidecar_mtime_ns
+        )
+
+        if cache_hit:
+            file_record = dict(cached_file)
+        else:
+            sidecar_meta = load_sidecar_metadata_from_path(sidecar_path) if sidecar_mtime_ns else None
+            file_record = _build_file_record(entry.name, entry.path, size_bytes, mtime, sidecar_meta)
+            changed = True
+
+        next_entries[entry.name] = {
+            "size_bytes": size_bytes,
+            "mtime_ns": mtime_ns,
+            "sidecar_mtime_ns": sidecar_mtime_ns,
+            "file": file_record,
+        }
+        files.append(file_record)
 
     if set(cached_entries.keys()) != set(next_entries.keys()):
         changed = True
