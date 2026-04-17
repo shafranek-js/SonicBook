@@ -67,7 +67,7 @@ function buildGoogleDriveStreamUrl(fileId, resourceKey = '') {
         params.set('resource_key', resourceKey);
     }
     const suffix = params.toString();
-    return `/api/google-drive/files/${encodeURIComponent(fileId)}/stream${suffix ? `?${suffix}` : ''}`;
+    return `/api/google-drive/files/${encodeURIComponent(fileId)}/stream${suffix ? `?${suffix}&token=${window.API_TOKEN}` : `?token=${window.API_TOKEN}`}`;
 }
 
 function setDriveStreamBuffering(fileId, isBuffering = true, syncStatus = true) {
@@ -520,7 +520,7 @@ function initPlayerChapterInteractions() {
 function playCurrentTrack(autoplay = false) {
     if (!playerState.playlist.length) return;
     const track = playerState.playlist[playerState.currentTrackIndex];
-    const trackUrl = track.url || ('/api/files/' + track.file.split('/').map(p => encodeURIComponent(p)).join('/'));
+    const trackUrl = track.url || ('/api/files/' + track.file.split('/').map(p => encodeURIComponent(p)).join('/') + '?token=' + window.API_TOKEN);
     audio.src = trackUrl;
     audio.autoplay = autoplay;
     audio.load();
@@ -573,7 +573,7 @@ async function initPlayer(fileName, autoOpenChapters = false, autoPlay = false) 
     clearPlayerCover();
     coverImg.onload = schedulePlayerLayoutSync;
     audio.autoplay = false;
-    const localFileUrl = '/api/files/' + encodeURIComponent(fileName);
+    const localFileUrl = '/api/files/' + encodeURIComponent(fileName) + '?token=' + window.API_TOKEN;
     const canStartImmediately = autoPlay && !fileName.toLowerCase().endsWith('.zip');
     if (canStartImmediately) {
         audio.src = localFileUrl;
@@ -597,7 +597,7 @@ async function initPlayer(fileName, autoOpenChapters = false, autoPlay = false) 
                 }
             }
             if (meta.local_cover) {
-                setPlayerCover('/api/files/' + encodeURIComponent(meta.local_cover));
+                setPlayerCover('/api/files/' + encodeURIComponent(meta.local_cover) + '?token=' + window.API_TOKEN);
             } else if (meta.cover_url) {
                 setPlayerCover(meta.cover_url);
             }

@@ -242,10 +242,27 @@ app = FastAPI(title="SonicBook", lifespan=lifespan)
 # Mount static files (CSS, JS)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+from fastapi.responses import JSONResponse
+
+@app.middleware("http")
+async def security_token_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        token = request.headers.get("X-SonicBook-Token")
+        if not token:
+            token = request.query_params.get("token")
+
+        if token != config.API_TOKEN:
+            return JSONResponse(status_code=403, content={"detail": "Forbidden: Invalid API Token"})
+
+    return await call_next(request)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     async with aiofiles.open("index.html", "r", encoding="utf-8") as f:
-        return await f.read()
+        content = await f.read()
+        content = content.replace("</head>", f'<script>window.API_TOKEN="{config.API_TOKEN}";</script></head>')
+        return content
 
 
 @app.get("/favicon.ico", include_in_schema=False)

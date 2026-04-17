@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import uuid
+import secrets
 
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,8 @@ WORK_DIR = os.path.join(BASE_DIR, ".sonicbook-work")
 DEBUG_LOG = os.path.join(BASE_DIR, "app_debug.log")
 
 DEFAULT_DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
+API_TOKEN = secrets.token_hex(32)
+
 DEFAULT_SETTINGS = {
     "downloads_dir": DEFAULT_DOWNLOADS_DIR,
     "instance_id": "",

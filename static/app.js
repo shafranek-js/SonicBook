@@ -1,3 +1,14 @@
+const originalFetch = window.fetch;
+window.fetch = function() {
+    let [resource, config] = arguments;
+    if (typeof resource === 'string' && resource.startsWith('/api/')) {
+        config = config || {};
+        config.headers = config.headers || {};
+        config.headers['X-SonicBook-Token'] = window.API_TOKEN;
+    }
+    return originalFetch(resource, config);
+};
+
 const i18n = {
     en: {
         placeholder: "Paste link here...",

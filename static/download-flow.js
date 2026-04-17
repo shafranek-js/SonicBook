@@ -244,7 +244,7 @@ function poll(id) {
     if (activeProgressEventSource) {
         activeProgressEventSource.close();
     }
-    const eventSource = new EventSource('/api/progress/stream/' + id);
+    const eventSource = new EventSource('/api/progress/stream/' + id + '?token=' + window.API_TOKEN);
     activeProgressEventSource = eventSource;
     eventSource.onmessage = function(event) {
         const data = JSON.parse(event.data), t = i18n[appState.currentLang];
