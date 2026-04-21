@@ -318,7 +318,7 @@ def _parse_public_modified_label(value: str) -> float:
     current_year = datetime.now().year
     for fmt in ("%b %d", "%B %d"):
         try:
-            parsed = datetime.strptime(label, fmt).replace(year=current_year)
+            parsed = datetime.strptime(f"{label} {current_year}", f"{fmt} %Y")
             if parsed.timestamp() > time.time() + 172800:
                 parsed = parsed.replace(year=current_year - 1)
             return parsed.timestamp()

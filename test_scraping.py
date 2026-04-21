@@ -1,7 +1,8 @@
 import asyncio
-from playwright.async_api import async_playwright
 
-async def test_scraping(url):
+async def run_scraping_debug(url):
+    from playwright.async_api import async_playwright
+
     print(f"Testing URL: {url}")
     async with async_playwright() as p:
         # Запускаем браузер
@@ -54,4 +55,4 @@ async def test_scraping(url):
 
 if __name__ == "__main__":
     url = "https://akniga.org/dish-tomas-genocid"
-    asyncio.run(test_scraping(url))
+    asyncio.run(run_scraping_debug(url))

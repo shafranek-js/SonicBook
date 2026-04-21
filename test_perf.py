@@ -1,7 +1,6 @@
 import asyncio
 import time
 import os
-import aiofiles
 
 class MockResponse:
     def __init__(self, size_mb, chunk_size=1024*1024): # 1MB chunks
@@ -26,6 +25,8 @@ async def mock_download_sync(size_mb, path):
             f.write(chunk)
 
 async def mock_download_async(size_mb, path):
+    import aiofiles
+
     response = MockResponse(size_mb)
     async with aiofiles.open(path, "wb") as f:
         async for chunk in response.aiter_bytes():
@@ -40,7 +41,7 @@ async def background_task(interval, counters):
     except asyncio.CancelledError:
         pass
 
-async def test_performance(func, name, path):
+async def run_performance_case(func, name, path):
     counters = [0]
     task = asyncio.create_task(background_task(0.01, counters))
     start_time = time.perf_counter()
@@ -54,9 +55,9 @@ async def test_performance(func, name, path):
 
 async def main():
     print("Testing sync file write...")
-    await test_performance(mock_download_sync, "Sync", "sync.bin")
+    await run_performance_case(mock_download_sync, "Sync", "sync.bin")
     print("\nTesting async file write...")
-    await test_performance(mock_download_async, "Async", "async.bin")
+    await run_performance_case(mock_download_async, "Async", "async.bin")
 
 if __name__ == "__main__":
     asyncio.run(main())

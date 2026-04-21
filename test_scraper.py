@@ -1,7 +1,8 @@
 import asyncio
-from playwright.async_api import async_playwright
 
-async def test():
+async def run_scraper_debug():
+    from playwright.async_api import async_playwright
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
@@ -15,4 +16,4 @@ async def test():
         await browser.close()
 
 if __name__ == "__main__":
-    asyncio.run(test())
+    asyncio.run(run_scraper_debug())
