@@ -51,6 +51,20 @@
                 <div class="controls">
                     <button class="btn-icon" id="libBtn" onclick="toggleLibrary()" title="Library">📚</button>
                     <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
+                    <div class="sleep-timer-wrap" id="sleepTimerWrap">
+                        <button class="btn-icon sleep-timer-btn" id="sleepTimerBtn" type="button" onclick="toggleSleepTimer()" title="Sleep timer" aria-label="Sleep timer" aria-pressed="false">
+                            <span class="sleep-timer-icon" aria-hidden="true">⏲</span>
+                            <span class="sleep-timer-countdown timecode" id="sleepTimerCountdown">1:00:00</span>
+                        </button>
+                        <select class="sleep-timer-duration" id="sleepTimerDuration" onchange="handleSleepTimerDurationChange()" title="Sleep timer duration" aria-label="Sleep timer duration">
+                            <option value="15">15m</option>
+                            <option value="30">30m</option>
+                            <option value="45">45m</option>
+                            <option value="60" selected>1h</option>
+                            <option value="90">1.5h</option>
+                            <option value="120">2h</option>
+                        </select>
+                    </div>
                     <button class="btn-icon toolbar-action-btn" id="downloadAnotherBtn" onclick="handleAction()" title="Download another" aria-label="Download another" hidden>⭳</button>
                     <div class="settings-wrap" id="settingsWrap">
                         <button class="btn-icon settings-btn" id="settingsBtn" onclick="toggleSettingsMenu()" title="Settings" aria-label="Settings" aria-expanded="false" aria-controls="settingsMenu">⚙</button>

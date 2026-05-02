@@ -138,6 +138,47 @@
 .toolbar-action-btn[hidden] {
     display: none;
 }
+.sleep-timer-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sleep-timer-wrap[hidden] {
+    display: none;
+}
+.sleep-timer-btn {
+    width: auto;
+    min-width: 94px;
+    gap: 6px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+.sleep-timer-btn.is-active {
+    color: #d1fae5;
+    border-color: rgba(16, 185, 129, 0.34);
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.14), rgba(16, 185, 129, 0.05));
+}
+.sleep-timer-countdown {
+    min-width: 50px;
+    text-align: left;
+    font-size: 0.72rem;
+}
+.sleep-timer-duration {
+    width: 70px;
+    height: 36px;
+    margin: 0;
+    padding: 0 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.75rem;
+    outline: none;
+}
+.sleep-timer-duration:focus {
+    border-color: var(--primary);
+}
 input { width: 100%; padding: 12px; border: 2px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); margin-bottom: 0; outline: none; }
 #urlInput {
     display: block;
@@ -422,6 +463,15 @@ button#mainBtn:disabled { opacity: 0.5; }
 }
 .light-theme .settings-menu input#googleDriveFolderInput {
     background: #ffffff;
+}
+.light-theme .sleep-timer-duration {
+    background: #ffffff;
+    border-color: rgba(148, 163, 184, 0.28);
+}
+.light-theme .sleep-timer-btn.is-active {
+    color: #15803d;
+    border-color: rgba(34, 197, 94, 0.26);
+    background: rgba(34, 197, 94, 0.08);
 }
 .main-card.player-session .options-group {
     gap: 4px;

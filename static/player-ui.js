@@ -7,6 +7,15 @@ let bookmarkSyncTimer = null;
 let driveStreamStartupTimer = null;
 let driveStreamPlayingStatusTimer = null;
 const DRIVE_STREAM_START_TIMEOUT_MS = 15000;
+const SLEEP_TIMER_DEFAULT_MINUTES = 60;
+const SLEEP_TIMER_IDLE_POLL_MS = 5000;
+const SLEEP_TIMER_ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'];
+let sleepTimerInterval = null;
+let sleepTimerDeadlineAt = 0;
+let sleepTimerLastActivityAt = 0;
+let sleepTimerNextIdlePollAt = 0;
+let sleepTimerIdlePollInFlight = false;
+let sleepTimerSystemIdleSupported = null;
 
 function toFiniteNumber(value, fallback = 0) {
     const numeric = Number(value);
@@ -15,6 +24,225 @@ function toFiniteNumber(value, fallback = 0) {
 
 function hasFiniteDuration(value) {
     return Number.isFinite(value) && value > 0;
+}
+
+function getSleepTimerDurationMinutes() {
+    const select = document.getElementById('sleepTimerDuration');
+    const rawValue = select ? select.value : appState.sleepTimer.durationMinutes;
+    const minutes = Number(rawValue);
+    return Number.isFinite(minutes) && minutes > 0 ? minutes : SLEEP_TIMER_DEFAULT_MINUTES;
+}
+
+function getSleepTimerDurationSeconds() {
+    return getSleepTimerDurationMinutes() * 60;
+}
+
+function formatSleepTimerCountdown(seconds) {
+    const safeSeconds = Math.max(0, Math.ceil(Number(seconds) || 0));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const remainder = safeSeconds % 60;
+    if (hours > 0) {
+        return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+    }
+    return `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function resetSleepTimerCountdown() {
+    const remainingSeconds = getSleepTimerDurationSeconds();
+    appState.sleepTimer.remainingSeconds = remainingSeconds;
+    sleepTimerDeadlineAt = Date.now() + remainingSeconds * 1000;
+    syncSleepTimerUI();
+}
+
+function startSleepTimerTicker() {
+    if (sleepTimerInterval) {
+        clearInterval(sleepTimerInterval);
+    }
+    sleepTimerInterval = window.setInterval(tickSleepTimer, 1000);
+    tickSleepTimer();
+}
+
+function stopSleepTimerTicker() {
+    if (sleepTimerInterval) {
+        clearInterval(sleepTimerInterval);
+        sleepTimerInterval = null;
+    }
+}
+
+async function syncSleepTimerWithSystemIdle(force = false) {
+    if (!appState.sleepTimer.enabled || sleepTimerIdlePollInFlight) {
+        return false;
+    }
+    const now = Date.now();
+    if (!force && (sleepTimerSystemIdleSupported === false || now < sleepTimerNextIdlePollAt)) {
+        return false;
+    }
+    sleepTimerIdlePollInFlight = true;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 3000);
+    try {
+        const res = await fetch('/api/system/idle', {
+            cache: 'no-store',
+            signal: controller.signal
+        });
+        if (!res.ok) {
+            throw new Error(`System idle check failed: ${res.status}`);
+        }
+        const data = await res.json();
+        if (!appState.sleepTimer.enabled) {
+            return false;
+        }
+        const idleSeconds = Number(data.idle_seconds);
+        if (!data.supported || !Number.isFinite(idleSeconds)) {
+            sleepTimerSystemIdleSupported = false;
+            return false;
+        }
+        sleepTimerSystemIdleSupported = true;
+        const remainingSeconds = Math.max(0, Math.ceil(getSleepTimerDurationSeconds() - idleSeconds));
+        appState.sleepTimer.remainingSeconds = remainingSeconds;
+        sleepTimerDeadlineAt = Date.now() + remainingSeconds * 1000;
+        if (remainingSeconds <= 0) {
+            pausePlaybackForSleepTimer();
+        } else {
+            syncSleepTimerUI();
+        }
+        return true;
+    } catch (e) {
+        sleepTimerSystemIdleSupported = false;
+        return false;
+    } finally {
+        window.clearTimeout(timeoutId);
+        sleepTimerNextIdlePollAt = Date.now() + SLEEP_TIMER_IDLE_POLL_MS;
+        sleepTimerIdlePollInFlight = false;
+    }
+}
+
+function setSleepTimerEnabled(enabled, announce = false) {
+    const nextEnabled = Boolean(enabled);
+    appState.sleepTimer.enabled = nextEnabled;
+    if (nextEnabled) {
+        sleepTimerSystemIdleSupported = null;
+        sleepTimerNextIdlePollAt = 0;
+        resetSleepTimerCountdown();
+        void syncSleepTimerWithSystemIdle(true);
+        startSleepTimerTicker();
+        if (announce) {
+            setStatusMessage(i18n[appState.currentLang].sleepTimerActive, 'info');
+        }
+    } else {
+        stopSleepTimerTicker();
+        appState.sleepTimer.remainingSeconds = getSleepTimerDurationSeconds();
+        sleepTimerDeadlineAt = 0;
+        sleepTimerNextIdlePollAt = 0;
+        sleepTimerIdlePollInFlight = false;
+        if (announce) {
+            setStatusMessage(i18n[appState.currentLang].sleepTimerOff, 'info');
+        }
+    }
+    syncSleepTimerUI();
+}
+
+function pausePlaybackForSleepTimer() {
+    setSleepTimerEnabled(false, false);
+    if (!audio.paused) {
+        audio.pause();
+    }
+    setPlayButtonState(false);
+    syncLibraryPlayIcons();
+    setStatusMessage(i18n[appState.currentLang].sleepTimerStopped, 'info');
+}
+
+function tickSleepTimer() {
+    if (!appState.sleepTimer.enabled) {
+        return;
+    }
+    if (sleepTimerSystemIdleSupported !== false) {
+        void syncSleepTimerWithSystemIdle(false);
+    }
+    const remainingSeconds = Math.max(0, Math.ceil((sleepTimerDeadlineAt - Date.now()) / 1000));
+    appState.sleepTimer.remainingSeconds = remainingSeconds;
+    if (remainingSeconds <= 0) {
+        if (sleepTimerSystemIdleSupported === true || sleepTimerIdlePollInFlight) {
+            void syncSleepTimerWithSystemIdle(true);
+            syncSleepTimerUI();
+            return;
+        }
+        pausePlaybackForSleepTimer();
+        return;
+    }
+    syncSleepTimerUI();
+}
+
+function handleSleepTimerActivity(event) {
+    if (!appState.sleepTimer.enabled) {
+        return;
+    }
+    const now = Date.now();
+    if (event.type === 'mousemove' && now - sleepTimerLastActivityAt < 1000) {
+        return;
+    }
+    sleepTimerLastActivityAt = now;
+    resetSleepTimerCountdown();
+}
+
+function toggleSleepTimer() {
+    setSleepTimerEnabled(!appState.sleepTimer.enabled, true);
+}
+
+function handleSleepTimerDurationChange() {
+    const minutes = getSleepTimerDurationMinutes();
+    appState.sleepTimer.durationMinutes = minutes;
+    localStorage.setItem('sleep-timer-minutes', String(minutes));
+    if (appState.sleepTimer.enabled) {
+        resetSleepTimerCountdown();
+        return;
+    }
+    appState.sleepTimer.remainingSeconds = minutes * 60;
+    syncSleepTimerUI();
+}
+
+function syncSleepTimerUI() {
+    const button = document.getElementById('sleepTimerBtn');
+    const countdown = document.getElementById('sleepTimerCountdown');
+    const select = document.getElementById('sleepTimerDuration');
+    if (!button || !countdown || !select || !appState.sleepTimer) {
+        return;
+    }
+    const t = i18n[appState.currentLang];
+    const selectedMinutes = Number(select.value);
+    if (!Number.isFinite(selectedMinutes) || selectedMinutes !== appState.sleepTimer.durationMinutes) {
+        select.value = String(appState.sleepTimer.durationMinutes || SLEEP_TIMER_DEFAULT_MINUTES);
+    }
+    const remainingSeconds = appState.sleepTimer.enabled
+        ? appState.sleepTimer.remainingSeconds
+        : getSleepTimerDurationSeconds();
+    countdown.innerText = formatSleepTimerCountdown(remainingSeconds);
+    button.classList.toggle('is-active', appState.sleepTimer.enabled);
+    button.setAttribute('aria-pressed', appState.sleepTimer.enabled ? 'true' : 'false');
+    button.setAttribute('aria-label', t.sleepTimerTitle);
+    button.title = appState.sleepTimer.enabled ? t.sleepTimerActive : t.sleepTimerOff;
+    select.setAttribute('aria-label', t.sleepTimerDuration);
+    select.title = t.sleepTimerDuration;
+}
+
+function initSleepTimer() {
+    const select = document.getElementById('sleepTimerDuration');
+    if (select) {
+        select.value = String(appState.sleepTimer.durationMinutes || SLEEP_TIMER_DEFAULT_MINUTES);
+    }
+    appState.sleepTimer.durationMinutes = getSleepTimerDurationMinutes();
+    appState.sleepTimer.remainingSeconds = appState.sleepTimer.durationMinutes * 60;
+    SLEEP_TIMER_ACTIVITY_EVENTS.forEach(eventName => {
+        window.addEventListener(eventName, handleSleepTimerActivity, { passive: true });
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            handleSleepTimerActivity({ type: 'visibilitychange' });
+        }
+    });
+    window.addEventListener('focus', () => handleSleepTimerActivity({ type: 'focus' }));
+    syncSleepTimerUI();
 }
 
 function restoreSavedPlaybackPosition(savedBmk) {
@@ -832,3 +1060,4 @@ window.addEventListener('keydown', (e) => {
 });
 
 initPlayerChapterInteractions();
+initSleepTimer();

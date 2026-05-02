@@ -63,6 +63,31 @@ def build_inline_content_disposition(file_path: str) -> str:
     return f"inline; filename*=utf-8''{quote(os.path.basename(file_path))}"
 
 
+def get_system_idle_seconds() -> float | None:
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+
+        class LastInputInfo(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_uint),
+                ("dwTime", ctypes.c_uint),
+            ]
+
+        last_input = LastInputInfo()
+        last_input.cbSize = ctypes.sizeof(last_input)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(last_input)):
+            return None
+
+        current_tick = ctypes.windll.kernel32.GetTickCount()
+        elapsed_ms = (current_tick - last_input.dwTime) & 0xFFFFFFFF
+        return max(0.0, elapsed_ms / 1000.0)
+    except Exception:
+        logger.debug("Failed to read system idle time", exc_info=True)
+        return None
+
+
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | None:
     if not range_header:
         return None
@@ -251,6 +276,16 @@ async def index():
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     return RedirectResponse(url="/static/favicon.svg", status_code=307)
+
+
+@app.get("/api/system/idle")
+async def system_idle():
+    idle_seconds = get_system_idle_seconds()
+    return {
+        "supported": idle_seconds is not None,
+        "idle_seconds": idle_seconds,
+    }
+
 
 @app.get("/api/settings/folder")
 async def get_folder():

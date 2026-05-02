@@ -85,6 +85,11 @@ const i18n = {
         googleDriveLibraryHint: "Save a shared folder link or connect Google Drive to browse remote books here.",
         googleDriveLibraryError: "Could not load Google Drive library",
         googleDriveLibraryErrorHint: "Check the shared folder link, account connection, or network access to Google Drive.",
+        sleepTimerTitle: "Sleep timer",
+        sleepTimerOff: "Sleep timer off",
+        sleepTimerActive: "Sleep timer active. Any activity resets the countdown.",
+        sleepTimerStopped: "Sleep timer paused playback after inactivity.",
+        sleepTimerDuration: "Sleep timer duration",
         chaptersTooltip: "Show or hide chapter list",
         chapterCountShort: "ch",
         resetTooltip: "Reset playback progress",
@@ -162,6 +167,11 @@ const i18n = {
         googleDriveLibraryHint: "Сохраните shared link на папку или подключите Google Drive, чтобы видеть удалённые книги здесь.",
         googleDriveLibraryError: "Не удалось загрузить библиотеку Google Drive",
         googleDriveLibraryErrorHint: "Проверьте shared link, подключение аккаунта или доступ сети к Google Drive.",
+        sleepTimerTitle: "Таймер сна",
+        sleepTimerOff: "Таймер сна выключен",
+        sleepTimerActive: "Таймер сна включен. Любая активность сбрасывает отсчет.",
+        sleepTimerStopped: "Таймер сна остановил воспроизведение из-за неактивности.",
+        sleepTimerDuration: "Длительность таймера сна",
         chaptersTooltip: "Показать или скрыть список глав",
         chapterCountShort: "гл.",
         resetTooltip: "Сбросить прогресс прослушивания",
@@ -200,6 +210,11 @@ const appState = {
     },
     driveStreamBufferingFileId: '',
     driveStreamPhase: 'idle',
+    sleepTimer: {
+        enabled: false,
+        durationMinutes: Number(localStorage.getItem('sleep-timer-minutes')) || 60,
+        remainingSeconds: (Number(localStorage.getItem('sleep-timer-minutes')) || 60) * 60
+    },
     bookmarks: {},
     lastActivePlayback: null,
     sharedStateStatus: 'syncing'
@@ -876,6 +891,9 @@ function updateUI() {
     btn.innerText = stepConfig.mainButtonText;
     btn.style.display = stepConfig.mainButtonVisible ? 'block' : 'none';
     toolbarDownloadBtn.hidden = !stepConfig.toolbarDownloadVisible;
+    if (typeof syncSleepTimerUI === 'function') {
+        syncSleepTimerUI();
+    }
     if (secondaryBtn) {
         secondaryBtn.innerText = t.btnBackToPlayer;
         secondaryBtn.style.display = hasReturnablePlayer() ? 'block' : 'none';
