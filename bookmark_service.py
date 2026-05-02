@@ -226,34 +226,35 @@ def _normalize_state_payload(payload) -> dict:
 def _save_state(state: dict) -> bool:
     global _state_cache, _state_cache_mtime
     state_path = _shared_state_file()
-    temp_path = state_path + ".tmp"
-    payload = {
-        "version": STATE_VERSION,
-        "updated_at": time.time(),
-        "bookmarks": state.get("bookmarks", {}),
-        "last_active": _normalize_last_active(state.get("last_active")),
-    }
-    try:
-        _ensure_shared_state_dir()
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(temp_path, state_path)
-
-        # Invalidate cache locally
+    with config.locked_json_file(state_path):
+        temp_path = state_path + ".tmp"
+        payload = {
+            "version": STATE_VERSION,
+            "updated_at": time.time(),
+            "bookmarks": state.get("bookmarks", {}),
+            "last_active": _normalize_last_active(state.get("last_active")),
+        }
         try:
-            _state_cache_mtime = os.path.getmtime(state_path)
-        except OSError:
-            _state_cache_mtime = 0
-        _state_cache = _copy_state(payload)
+            _ensure_shared_state_dir()
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            os.replace(temp_path, state_path)
 
-        return True
-    except Exception:
-        if os.path.exists(temp_path):
+            # Invalidate cache locally
             try:
-                os.remove(temp_path)
+                _state_cache_mtime = os.path.getmtime(state_path)
             except OSError:
-                pass
-        return False
+                _state_cache_mtime = 0
+            _state_cache = _copy_state(payload)
+
+            return True
+        except Exception:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+            return False
 
 
 def _migrate_legacy_bookmarks_if_needed() -> dict | None:
@@ -283,47 +284,33 @@ def _migrate_legacy_bookmarks_if_needed() -> dict | None:
 
 def load_state() -> dict:
     global _state_cache, _state_cache_mtime
-    migrated_state = _migrate_legacy_bookmarks_if_needed()
-    if migrated_state is not None:
-        # If a migration just occurred, don't use cache, normalize and return directly
-        state = _normalize_state_payload(migrated_state)
-        _state_cache = _copy_state(state)
+    with config.locked_json_file(_shared_state_file()):
+        migrated_state = _migrate_legacy_bookmarks_if_needed()
+        if migrated_state is not None:
+            # If a migration just occurred, don't use cache, normalize and return directly
+            state = _normalize_state_payload(migrated_state)
+            _state_cache = _copy_state(state)
+            state_file = _shared_state_file()
+            try:
+                _state_cache_mtime = os.path.getmtime(state_file)
+            except OSError:
+                _state_cache_mtime = 0
+            return _copy_state(state)
+
         state_file = _shared_state_file()
         try:
-            _state_cache_mtime = os.path.getmtime(state_file)
+            mtime = os.path.getmtime(state_file)
         except OSError:
-            _state_cache_mtime = 0
+            mtime = 0
+
+        if _state_cache is not None and mtime > 0 and _state_cache_mtime == mtime:
+            return _copy_state(_state_cache)
+
+        raw_state = _load_json_file(state_file)
+        state = _normalize_state_payload(raw_state)
+        _state_cache = _copy_state(state)
+        _state_cache_mtime = mtime
         return _copy_state(state)
-
-    state_file = _shared_state_file()
-    try:
-        mtime = os.path.getmtime(state_file)
-    except OSError:
-        mtime = 0
-
-    if _state_cache is not None and mtime > 0 and _state_cache_mtime == mtime:
-        return _copy_state(_state_cache)
-
-    raw_state = _load_json_file(state_file)
-    state = _normalize_state_payload(raw_state)
-    _state_cache = _copy_state(state)
-    _state_cache_mtime = mtime
-    return _copy_state(state)
-
-    state_file = _shared_state_file()
-    try:
-        mtime = os.path.getmtime(state_file)
-    except OSError:
-        mtime = 0
-
-    if _state_cache is not None and mtime > 0 and _state_cache_mtime == mtime:
-        return _copy_state(_state_cache)
-
-    raw_state = _load_json_file(state_file)
-    state = _normalize_state_payload(raw_state)
-    _state_cache = _copy_state(state)
-    _state_cache_mtime = mtime
-    return state
 
 
 def load_bookmarks() -> dict:
@@ -331,9 +318,10 @@ def load_bookmarks() -> dict:
 
 
 def save_bookmarks(bookmarks: dict) -> bool:
-    state = load_state()
-    state["bookmarks"] = bookmarks if isinstance(bookmarks, dict) else {}
-    return _save_state(state)
+    with config.locked_json_file(_shared_state_file()):
+        state = load_state()
+        state["bookmarks"] = bookmarks if isinstance(bookmarks, dict) else {}
+        return _save_state(state)
 
 
 def get_bookmark(book_id: str) -> dict | None:
@@ -361,17 +349,19 @@ def save_last_active(payload: dict) -> dict:
     if not normalized["updated_at"]:
         normalized["updated_at"] = time.time()
 
-    state = load_state()
-    state["last_active"] = normalized
-    if not _save_state(state):
-        raise RuntimeError("Failed to persist last active playback.")
-    return copy.deepcopy(normalized)
+    with config.locked_json_file(_shared_state_file()):
+        state = load_state()
+        state["last_active"] = normalized
+        if not _save_state(state):
+            raise RuntimeError("Failed to persist last active playback.")
+        return copy.deepcopy(normalized)
 
 
 def clear_last_active() -> bool:
-    state = load_state()
-    state["last_active"] = {}
-    return _save_state(state)
+    with config.locked_json_file(_shared_state_file()):
+        state = load_state()
+        state["last_active"] = {}
+        return _save_state(state)
 
 
 def save_bookmark(book_id: str, payload: dict) -> dict:
@@ -403,54 +393,56 @@ def save_bookmark(book_id: str, payload: dict) -> dict:
     derived_completed = duration_value > 0 and (time_value / duration_value) >= 0.995
     completed_flag = completed_value if isinstance(completed_value, bool) else derived_completed
 
-    bookmarks = load_bookmarks()
-    aliases = build_book_id_aliases(book_id=book_id)
-    if book_id not in bookmarks:
-        for alias in aliases:
-            if alias != book_id and isinstance(bookmarks.get(alias), dict):
-                bookmarks[book_id] = bookmarks[alias]
-                del bookmarks[alias]
-                break
+    with config.locked_json_file(_shared_state_file()):
+        bookmarks = load_bookmarks()
+        aliases = build_book_id_aliases(book_id=book_id)
+        if book_id not in bookmarks:
+            for alias in aliases:
+                if alias != book_id and isinstance(bookmarks.get(alias), dict):
+                    bookmarks[book_id] = bookmarks[alias]
+                    del bookmarks[alias]
+                    break
 
-    bookmark = {
-        "time": round(time_value, 3),
-        "duration": round(duration_value, 3),
-        "track": max(0, track_value),
-        "file_name": payload.get("file_name", ""),
-        "source": payload.get("source", ""),
-        "completed": completed_flag,
-        "updated_at": time.time(),
-    }
-    bookmarks[book_id] = bookmark
+        bookmark = {
+            "time": round(time_value, 3),
+            "duration": round(duration_value, 3),
+            "track": max(0, track_value),
+            "file_name": payload.get("file_name", ""),
+            "source": payload.get("source", ""),
+            "completed": completed_flag,
+            "updated_at": time.time(),
+        }
+        bookmarks[book_id] = bookmark
 
-    state = load_state()
-    state["bookmarks"] = bookmarks
-    if not _save_state(state):
-        raise RuntimeError("Failed to persist bookmark.")
-    return copy.deepcopy(bookmark)
+        state = load_state()
+        state["bookmarks"] = bookmarks
+        if not _save_state(state):
+            raise RuntimeError("Failed to persist bookmark.")
+        return copy.deepcopy(bookmark)
 
 
 def delete_bookmark(book_id: str) -> bool:
     if not book_id:
         return False
 
-    state = load_state()
-    bookmarks = state.get("bookmarks", {})
-    changed = False
-    for candidate_id in build_book_id_aliases(book_id=book_id):
-        if candidate_id in bookmarks:
-            del bookmarks[candidate_id]
-            changed = True
+    with config.locked_json_file(_shared_state_file()):
+        state = load_state()
+        bookmarks = state.get("bookmarks", {})
+        changed = False
+        for candidate_id in build_book_id_aliases(book_id=book_id):
+            if candidate_id in bookmarks:
+                del bookmarks[candidate_id]
+                changed = True
 
-    last_active = state.get("last_active") or {}
-    if last_active:
-        active_book_id = str(last_active.get("book_id") or "").strip()
-        if active_book_id and active_book_id in build_book_id_aliases(book_id=book_id):
-            state["last_active"] = {}
-            changed = True
+        last_active = state.get("last_active") or {}
+        if last_active:
+            active_book_id = str(last_active.get("book_id") or "").strip()
+            if active_book_id and active_book_id in build_book_id_aliases(book_id=book_id):
+                state["last_active"] = {}
+                changed = True
 
-    if not changed:
-        return True
+        if not changed:
+            return True
 
-    state["bookmarks"] = bookmarks
-    return _save_state(state)
+        state["bookmarks"] = bookmarks
+        return _save_state(state)

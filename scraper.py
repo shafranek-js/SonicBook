@@ -4,11 +4,16 @@ import json
 import logging
 import base64
 import html
+import os
+import time
+import copy
+import threading
 import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from urllib.parse import urljoin, urlparse, parse_qs, unquote
 from processor import sanitize_filename
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +24,10 @@ def log_debug(message):
 playwright_instance = None
 browser_instance = None
 browser_start_error = ""
+PREVIEW_CACHE_TTL_SECONDS = int(os.getenv("SONICBOOK_PREVIEW_CACHE_TTL_SECONDS", "900"))
+PREVIEW_CACHE_FILE = os.path.join(config.BASE_DIR, ".sonicbook-state", "preview_cache.json")
+_preview_cache = {}
+_preview_cache_lock = threading.RLock()
 
 
 def describe_playwright_issue(exc: Exception) -> str:
@@ -68,6 +77,203 @@ async def close_browser():
     playwright_instance = None
     browser_instance = None
     browser_start_error = ""
+
+
+def _normalize_cache_url(url: str) -> str:
+    return str(url or "").strip()
+
+
+def _normalize_chapter_payload(chapter) -> dict | None:
+    if not isinstance(chapter, dict):
+        return None
+    title = str(chapter.get("title") or "").strip()
+    if not title:
+        title = "Chapter"
+    try:
+        start = float(chapter.get("start") or 0)
+    except (TypeError, ValueError):
+        start = 0.0
+    try:
+        end = float(chapter.get("end") or 0)
+    except (TypeError, ValueError):
+        end = 0.0
+    return {
+        "title": title,
+        "start": start,
+        "end": end,
+    }
+
+
+def _normalize_preview_cache_entry(entry) -> dict | None:
+    if not isinstance(entry, dict):
+        return None
+
+    try:
+        created_at = float(entry.get("created_at") or 0)
+    except (TypeError, ValueError):
+        return None
+
+    result = entry.get("result")
+    if not isinstance(result, dict):
+        return None
+
+    m3u8 = str(result.get("m3u8") or "").strip()
+    if not m3u8:
+        return None
+
+    title = str(result.get("title") or "audiobook").strip() or "audiobook"
+    cover_value = result.get("cover")
+    cover = str(cover_value).strip() if cover_value else None
+
+    chapters = result.get("chapters")
+    normalized_chapters = []
+    if isinstance(chapters, list):
+        for chapter in chapters:
+            normalized = _normalize_chapter_payload(chapter)
+            if normalized is not None:
+                normalized_chapters.append(normalized)
+
+    return {
+        "created_at": created_at,
+        "result": {
+            "m3u8": m3u8,
+            "title": title,
+            "chapters": normalized_chapters,
+            "cover": cover,
+        },
+    }
+
+
+def _prune_preview_cache_entries(entries: dict | None) -> dict:
+    now_ts = time.time()
+    normalized = {}
+    source = entries if isinstance(entries, dict) else {}
+    for raw_url, raw_entry in source.items():
+        url = _normalize_cache_url(raw_url)
+        if not url:
+            continue
+        entry = _normalize_preview_cache_entry(raw_entry)
+        if entry is None:
+            continue
+        if now_ts - float(entry["created_at"]) > PREVIEW_CACHE_TTL_SECONDS:
+            continue
+        normalized[url] = entry
+    return normalized
+
+
+def _write_preview_cache_file(entries: dict):
+    os.makedirs(os.path.dirname(PREVIEW_CACHE_FILE), exist_ok=True)
+    temp_path = PREVIEW_CACHE_FILE + ".tmp"
+    payload = {
+        "entries": entries,
+        "updated_at": time.time(),
+    }
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, PREVIEW_CACHE_FILE)
+
+
+def _save_preview_cache_to_disk():
+    with _preview_cache_lock:
+        snapshot = _prune_preview_cache_entries(_preview_cache)
+        _preview_cache.clear()
+        _preview_cache.update(snapshot)
+
+    with config.locked_json_file(PREVIEW_CACHE_FILE):
+        try:
+            if not snapshot:
+                if os.path.exists(PREVIEW_CACHE_FILE):
+                    os.remove(PREVIEW_CACHE_FILE)
+                return
+            _write_preview_cache_file(snapshot)
+        except Exception:
+            logger.warning("Failed to persist preview cache", exc_info=True)
+
+
+def _load_preview_cache_from_disk():
+    with config.locked_json_file(PREVIEW_CACHE_FILE):
+        if not os.path.exists(PREVIEW_CACHE_FILE):
+            entries = {}
+        else:
+            try:
+                with open(PREVIEW_CACHE_FILE, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+            except Exception:
+                entries = {}
+            else:
+                if isinstance(payload, dict):
+                    entries = payload.get("entries", {})
+                else:
+                    entries = {}
+        pruned = _prune_preview_cache_entries(entries)
+        if pruned != entries:
+            try:
+                if pruned:
+                    _write_preview_cache_file(pruned)
+                elif os.path.exists(PREVIEW_CACHE_FILE):
+                    os.remove(PREVIEW_CACHE_FILE)
+            except Exception:
+                logger.warning("Failed to rewrite preview cache", exc_info=True)
+
+    with _preview_cache_lock:
+        _preview_cache.clear()
+        _preview_cache.update(pruned)
+
+
+def _get_cached_book_info(book_url: str):
+    url = _normalize_cache_url(book_url)
+    if not url:
+        return None
+
+    with _preview_cache_lock:
+        entry = _preview_cache.get(url)
+        if entry is None:
+            return None
+        if time.time() - float(entry.get("created_at") or 0) > PREVIEW_CACHE_TTL_SECONDS:
+            del _preview_cache[url]
+            should_persist = True
+        else:
+            should_persist = False
+            result = copy.deepcopy(entry.get("result", {}))
+
+    if should_persist:
+        _save_preview_cache_to_disk()
+        return None
+
+    m3u8 = result.get("m3u8")
+    title = result.get("title", "audiobook")
+    chapters = result.get("chapters", [])
+    cover = result.get("cover")
+    return m3u8, title, chapters, cover
+
+
+def _cache_book_info(book_url: str, m3u8: str, title: str, chapters: list, cover):
+    url = _normalize_cache_url(book_url)
+    if not url or not m3u8:
+        return
+
+    normalized_chapters = []
+    for chapter in (chapters or []):
+        normalized = _normalize_chapter_payload(chapter)
+        if normalized is not None:
+            normalized_chapters.append(normalized)
+
+    cover_value = str(cover).strip() if cover else None
+    entry = {
+        "created_at": time.time(),
+        "result": {
+            "m3u8": str(m3u8),
+            "title": str(title or "audiobook"),
+            "chapters": normalized_chapters,
+            "cover": cover_value,
+        },
+    }
+    with _preview_cache_lock:
+        _preview_cache[url] = entry
+    _save_preview_cache_to_disk()
+
+
+_load_preview_cache_from_disk()
 
 def parse_time_to_seconds(time_str):
     try:
@@ -348,12 +554,21 @@ async def _parse_browser_based(book_url, res):
     return playwright_failure
 
 async def get_book_info(book_url):
+    book_url = _normalize_cache_url(book_url)
+    cached = _get_cached_book_info(book_url)
+    if cached is not None:
+        log_debug(f"Preview cache hit: {book_url}")
+        return cached
+
     log_debug(f"Combined info scraping: {book_url}")
     res = {"m3u8": None, "title": "audiobook", "chapters": [], "cover": None}
     playwright_failure = ""
 
     if "knigavuhe.org" in book_url:
-        return await _parse_knigavuhe(book_url)
+        m3u8, title, chapters, cover = await _parse_knigavuhe(book_url)
+        if m3u8:
+            _cache_book_info(book_url, m3u8, title, chapters, cover)
+        return m3u8, title, chapters, cover
 
     if "audioboo.org" in book_url:
         log_debug("Detected audioboo.org, using ZIP parser...")
@@ -376,6 +591,7 @@ async def get_book_info(book_url):
                     if zip_url:
                         log_debug(f"Audioboo: Found direct ZIP URL {zip_url}")
                         res["m3u8"] = f"DIRECT_ZIP:{zip_url}"
+                        _cache_book_info(book_url, res["m3u8"], res["title"], [], res["cover"])
                         return res["m3u8"], res["title"], [], res["cover"]
         except Exception as e:
             log_debug(f"Audioboo parse error: {e}")
@@ -387,5 +603,8 @@ async def get_book_info(book_url):
 
     if not res["m3u8"] and playwright_failure:
         raise RuntimeError(playwright_failure)
+
+    if res["m3u8"]:
+        _cache_book_info(book_url, res["m3u8"], res["title"], res["chapters"], res["cover"])
 
     return res["m3u8"], res["title"], res["chapters"], res["cover"]

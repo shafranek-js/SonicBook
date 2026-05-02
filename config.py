@@ -4,6 +4,9 @@ import logging
 import os
 import shutil
 import uuid
+import importlib
+import threading
+from contextlib import contextmanager
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +32,7 @@ DEFAULT_SETTINGS = {
             "connected": False,
             "access_token": "",
             "refresh_token": "",
+            "tokens_in_keyring": False,
             "token_type": "",
             "scope": "",
             "expires_at": 0,
@@ -37,6 +41,9 @@ DEFAULT_SETTINGS = {
         }
     }
 }
+GOOGLE_DRIVE_TOKEN_KEYRING_SERVICE = "SonicBook.GoogleDriveAuth"
+_json_file_locks: dict[str, threading.RLock] = {}
+_json_file_locks_guard = threading.Lock()
 
 
 def load_dotenv_file():
@@ -75,17 +82,113 @@ def _deep_merge(defaults, override):
     return merged
 
 
-def load_settings():
-    settings = copy.deepcopy(DEFAULT_SETTINGS)
+def _get_json_file_lock(path: str) -> threading.RLock:
+    normalized_path = os.path.abspath(path or "")
+    with _json_file_locks_guard:
+        lock = _json_file_locks.get(normalized_path)
+        if lock is None:
+            lock = threading.RLock()
+            _json_file_locks[normalized_path] = lock
+        return lock
+
+
+@contextmanager
+def locked_json_file(path: str):
+    lock = _get_json_file_lock(path)
+    lock.acquire()
     try:
-        if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-                if isinstance(loaded, dict):
-                    settings = _deep_merge(DEFAULT_SETTINGS, loaded)
+        yield
+    finally:
+        lock.release()
+
+
+def _get_keyring_module():
+    try:
+        return importlib.import_module("keyring")
     except Exception:
-        logger.exception("Failed to load settings")
-    return settings
+        return None
+
+
+def _get_google_drive_keyring_user(settings: dict) -> str:
+    instance_id, _ = _ensure_instance_id_in_settings(settings)
+    return f"{instance_id}:google_drive_auth"
+
+
+def _load_google_drive_tokens_from_keyring(settings: dict) -> dict:
+    keyring = _get_keyring_module()
+    if keyring is None:
+        return {}
+
+    user = _get_google_drive_keyring_user(settings)
+    try:
+        raw = keyring.get_password(GOOGLE_DRIVE_TOKEN_KEYRING_SERVICE, user)
+    except Exception:
+        logger.warning("Failed to read Google Drive tokens from keyring", exc_info=True)
+        return {}
+    if not raw:
+        return {}
+
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        logger.warning("Invalid Google Drive token payload in keyring", exc_info=True)
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    return {
+        "access_token": str(payload.get("access_token") or ""),
+        "refresh_token": str(payload.get("refresh_token") or ""),
+    }
+
+
+def _save_google_drive_tokens_to_keyring(settings: dict, access_token: str, refresh_token: str) -> bool:
+    keyring = _get_keyring_module()
+    if keyring is None:
+        return False
+
+    user = _get_google_drive_keyring_user(settings)
+    payload = json.dumps(
+        {
+            "access_token": str(access_token or ""),
+            "refresh_token": str(refresh_token or ""),
+        },
+        ensure_ascii=False,
+    )
+    try:
+        keyring.set_password(GOOGLE_DRIVE_TOKEN_KEYRING_SERVICE, user, payload)
+    except Exception:
+        logger.warning("Failed to persist Google Drive tokens in keyring", exc_info=True)
+        return False
+    return True
+
+
+def _clear_google_drive_tokens_from_keyring(settings: dict):
+    keyring = _get_keyring_module()
+    if keyring is None:
+        return
+
+    user = _get_google_drive_keyring_user(settings)
+    try:
+        keyring.delete_password(GOOGLE_DRIVE_TOKEN_KEYRING_SERVICE, user)
+    except Exception:
+        # It's fine when no entry exists or backend cannot delete.
+        pass
+
+
+def load_settings():
+    with locked_json_file(SETTINGS_FILE):
+        settings = copy.deepcopy(DEFAULT_SETTINGS)
+        try:
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        settings = _deep_merge(DEFAULT_SETTINGS, loaded)
+        except Exception:
+            logger.exception("Failed to load settings")
+        return settings
 
 
 def _normalize_playback_profile_id(value: str) -> str:
@@ -103,53 +206,88 @@ def _ensure_instance_id_in_settings(settings: dict) -> tuple[str, bool]:
 
 
 def save_settings(settings):
-    temp_settings_file = SETTINGS_FILE + ".tmp"
-    try:
-        settings_to_save = _deep_merge(DEFAULT_SETTINGS, settings or {})
-        _ensure_instance_id_in_settings(settings_to_save)
-        with open(temp_settings_file, "w", encoding="utf-8") as f:
-            json.dump(settings_to_save, f, ensure_ascii=False, indent=2)
-        os.replace(temp_settings_file, SETTINGS_FILE)
-        return True
-    except Exception:
-        logger.exception("Failed to save settings")
-        if os.path.exists(temp_settings_file):
-            try:
-                os.remove(temp_settings_file)
-            except OSError:
-                pass
-        return False
+    with locked_json_file(SETTINGS_FILE):
+        temp_settings_file = SETTINGS_FILE + ".tmp"
+        try:
+            settings_to_save = _deep_merge(DEFAULT_SETTINGS, settings or {})
+            _ensure_instance_id_in_settings(settings_to_save)
+            with open(temp_settings_file, "w", encoding="utf-8") as f:
+                json.dump(settings_to_save, f, ensure_ascii=False, indent=2)
+            os.replace(temp_settings_file, SETTINGS_FILE)
+            return True
+        except Exception:
+            logger.exception("Failed to save settings")
+            if os.path.exists(temp_settings_file):
+                try:
+                    os.remove(temp_settings_file)
+                except OSError:
+                    pass
+            return False
 
 
 def get_google_drive_settings():
     settings = load_settings()
-    return copy.deepcopy(settings.get("google_drive", DEFAULT_SETTINGS["google_drive"]))
+    google_drive = copy.deepcopy(settings.get("google_drive", DEFAULT_SETTINGS["google_drive"]))
+    auth = copy.deepcopy(google_drive.get("auth", DEFAULT_SETTINGS["google_drive"]["auth"]))
+
+    if auth.get("tokens_in_keyring"):
+        secure_tokens = _load_google_drive_tokens_from_keyring(settings)
+        if secure_tokens.get("access_token") or secure_tokens.get("refresh_token"):
+            auth["access_token"] = secure_tokens.get("access_token", "")
+            auth["refresh_token"] = secure_tokens.get("refresh_token", "")
+
+    google_drive["auth"] = _deep_merge(DEFAULT_SETTINGS["google_drive"]["auth"], auth)
+    return google_drive
 
 
 def clear_google_drive_auth():
-    settings = load_settings()
-    google_drive = settings.get("google_drive", {})
-    google_drive["auth"] = copy.deepcopy(DEFAULT_SETTINGS["google_drive"]["auth"])
-    settings["google_drive"] = _deep_merge(DEFAULT_SETTINGS["google_drive"], google_drive)
-    return save_settings(settings)
+    with locked_json_file(SETTINGS_FILE):
+        settings = load_settings()
+        _clear_google_drive_tokens_from_keyring(settings)
+        google_drive = settings.get("google_drive", {})
+        google_drive["auth"] = copy.deepcopy(DEFAULT_SETTINGS["google_drive"]["auth"])
+        settings["google_drive"] = _deep_merge(DEFAULT_SETTINGS["google_drive"], google_drive)
+        return save_settings(settings)
 
 
 def update_google_drive_auth(auth_updates):
-    settings = load_settings()
-    google_drive = settings.get("google_drive", copy.deepcopy(DEFAULT_SETTINGS["google_drive"]))
-    auth = google_drive.get("auth", copy.deepcopy(DEFAULT_SETTINGS["google_drive"]["auth"]))
-    auth.update(auth_updates or {})
-    google_drive["auth"] = _deep_merge(DEFAULT_SETTINGS["google_drive"]["auth"], auth)
-    settings["google_drive"] = _deep_merge(DEFAULT_SETTINGS["google_drive"], google_drive)
-    return save_settings(settings)
+    with locked_json_file(SETTINGS_FILE):
+        settings = load_settings()
+        google_drive = settings.get("google_drive", copy.deepcopy(DEFAULT_SETTINGS["google_drive"]))
+        auth = copy.deepcopy(google_drive.get("auth", copy.deepcopy(DEFAULT_SETTINGS["google_drive"]["auth"])))
+
+        if auth.get("tokens_in_keyring"):
+            secure_tokens = _load_google_drive_tokens_from_keyring(settings)
+            if secure_tokens:
+                auth.update(secure_tokens)
+
+        auth.update(auth_updates or {})
+
+        access_token = str(auth.get("access_token") or "")
+        refresh_token = str(auth.get("refresh_token") or "")
+        if access_token or refresh_token:
+            if _save_google_drive_tokens_to_keyring(settings, access_token, refresh_token):
+                auth["access_token"] = ""
+                auth["refresh_token"] = ""
+                auth["tokens_in_keyring"] = True
+            else:
+                auth["tokens_in_keyring"] = False
+        else:
+            _clear_google_drive_tokens_from_keyring(settings)
+            auth["tokens_in_keyring"] = False
+
+        google_drive["auth"] = _deep_merge(DEFAULT_SETTINGS["google_drive"]["auth"], auth)
+        settings["google_drive"] = _deep_merge(DEFAULT_SETTINGS["google_drive"], google_drive)
+        return save_settings(settings)
 
 
 def save_google_drive_folder_id(folder_id):
-    settings = load_settings()
-    google_drive = settings.get("google_drive", copy.deepcopy(DEFAULT_SETTINGS["google_drive"]))
-    google_drive["folder_id"] = (folder_id or "").strip()
-    settings["google_drive"] = _deep_merge(DEFAULT_SETTINGS["google_drive"], google_drive)
-    return save_settings(settings)
+    with locked_json_file(SETTINGS_FILE):
+        settings = load_settings()
+        google_drive = settings.get("google_drive", copy.deepcopy(DEFAULT_SETTINGS["google_drive"]))
+        google_drive["folder_id"] = (folder_id or "").strip()
+        settings["google_drive"] = _deep_merge(DEFAULT_SETTINGS["google_drive"], google_drive)
+        return save_settings(settings)
 
 
 def load_downloads_dir():
@@ -161,11 +299,12 @@ def load_downloads_dir():
 
 
 def get_instance_id() -> str:
-    settings = load_settings()
-    instance_id, changed = _ensure_instance_id_in_settings(settings)
-    if changed:
-        save_settings(settings)
-    return instance_id
+    with locked_json_file(SETTINGS_FILE):
+        settings = load_settings()
+        instance_id, changed = _ensure_instance_id_in_settings(settings)
+        if changed:
+            save_settings(settings)
+        return instance_id
 
 
 def get_playback_profile_status() -> dict:
@@ -204,15 +343,16 @@ def get_playback_profile_status() -> dict:
 
 
 def save_playback_profile_id(profile_id: str) -> dict:
-    settings = load_settings()
-    playback_profile = settings.get("playback_profile", copy.deepcopy(DEFAULT_SETTINGS["playback_profile"]))
-    normalized = _normalize_playback_profile_id(profile_id)
-    playback_profile["id"] = normalized
-    playback_profile["source"] = "manual" if normalized else "auto"
-    settings["playback_profile"] = _deep_merge(DEFAULT_SETTINGS["playback_profile"], playback_profile)
-    if not save_settings(settings):
-        raise RuntimeError("Failed to persist playback profile.")
-    return get_playback_profile_status()
+    with locked_json_file(SETTINGS_FILE):
+        settings = load_settings()
+        playback_profile = settings.get("playback_profile", copy.deepcopy(DEFAULT_SETTINGS["playback_profile"]))
+        normalized = _normalize_playback_profile_id(profile_id)
+        playback_profile["id"] = normalized
+        playback_profile["source"] = "manual" if normalized else "auto"
+        settings["playback_profile"] = _deep_merge(DEFAULT_SETTINGS["playback_profile"], playback_profile)
+        if not save_settings(settings):
+            raise RuntimeError("Failed to persist playback profile.")
+        return get_playback_profile_status()
 
 
 def sync_playback_profile_with_google_account(account_email: str) -> bool:
@@ -220,20 +360,21 @@ def sync_playback_profile_with_google_account(account_email: str) -> bool:
     if not normalized_email:
         return True
 
-    settings = load_settings()
-    playback_profile = settings.get("playback_profile", copy.deepcopy(DEFAULT_SETTINGS["playback_profile"]))
-    current_id = _normalize_playback_profile_id(playback_profile.get("id", ""))
-    current_source = str(playback_profile.get("source") or "auto").strip().lower()
+    with locked_json_file(SETTINGS_FILE):
+        settings = load_settings()
+        playback_profile = settings.get("playback_profile", copy.deepcopy(DEFAULT_SETTINGS["playback_profile"]))
+        current_id = _normalize_playback_profile_id(playback_profile.get("id", ""))
+        current_source = str(playback_profile.get("source") or "auto").strip().lower()
 
-    if current_id and current_source == "manual":
-        return True
-    if current_id == normalized_email and current_source == "google_account":
-        return True
+        if current_id and current_source == "manual":
+            return True
+        if current_id == normalized_email and current_source == "google_account":
+            return True
 
-    playback_profile["id"] = normalized_email
-    playback_profile["source"] = "google_account"
-    settings["playback_profile"] = _deep_merge(DEFAULT_SETTINGS["playback_profile"], playback_profile)
-    return save_settings(settings)
+        playback_profile["id"] = normalized_email
+        playback_profile["source"] = "google_account"
+        settings["playback_profile"] = _deep_merge(DEFAULT_SETTINGS["playback_profile"], playback_profile)
+        return save_settings(settings)
 
 
 DOWNLOADS_DIR = load_downloads_dir()
@@ -244,12 +385,13 @@ def save_downloads_dir(path):
     try:
         if not os.path.exists(path):
             os.makedirs(path)
-        settings = load_settings()
-        settings["downloads_dir"] = path
-        if save_settings(settings):
-            DOWNLOADS_DIR = path
-            return True
-        return False
+        with locked_json_file(SETTINGS_FILE):
+            settings = load_settings()
+            settings["downloads_dir"] = path
+            if save_settings(settings):
+                DOWNLOADS_DIR = path
+                return True
+            return False
     except Exception:
         logger.exception("Failed to save downloads directory")
         return False

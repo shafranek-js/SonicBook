@@ -4,6 +4,9 @@ let playerState = {
 
 const audio = document.getElementById('audioElement');
 let bookmarkSyncTimer = null;
+let driveStreamStartupTimer = null;
+let driveStreamPlayingStatusTimer = null;
+const DRIVE_STREAM_START_TIMEOUT_MS = 15000;
 
 function toFiniteNumber(value, fallback = 0) {
     const numeric = Number(value);
@@ -38,7 +41,6 @@ function restoreSavedPlaybackPosition(savedBmk) {
 async function requestAudioPlayback(isDriveStream = false) {
     try {
         await audio.play();
-        setPlayButtonState(true);
     } catch (e) {
         setPlayButtonState(false);
         syncLibraryPlayIcons();
@@ -70,11 +72,66 @@ function buildGoogleDriveStreamUrl(fileId, resourceKey = '') {
     return `/api/google-drive/files/${encodeURIComponent(fileId)}/stream${suffix ? `?${suffix}` : ''}`;
 }
 
-function setDriveStreamBuffering(fileId, isBuffering = true, syncStatus = true) {
-    appState.driveStreamBufferingFileId = isBuffering ? (fileId || '') : '';
+function clearDriveStreamStartupTimer() {
+    if (driveStreamStartupTimer) {
+        clearTimeout(driveStreamStartupTimer);
+        driveStreamStartupTimer = null;
+    }
+}
+
+function clearDriveStreamPlayingStatusTimer() {
+    if (driveStreamPlayingStatusTimer) {
+        clearTimeout(driveStreamPlayingStatusTimer);
+        driveStreamPlayingStatusTimer = null;
+    }
+}
+
+function scheduleDriveStreamPlayingStatusClear() {
+    clearDriveStreamPlayingStatusTimer();
+    driveStreamPlayingStatusTimer = window.setTimeout(() => {
+        if (playerState.source === 'google_drive' && appState.driveStreamPhase === 'playing') {
+            clearStatusMessage();
+        }
+    }, 2500);
+}
+
+function scheduleDriveStreamStartupTimeout(fileId, phase) {
+    clearDriveStreamStartupTimer();
+    if (!fileId || !['connecting', 'buffering'].includes(phase)) {
+        return;
+    }
+    driveStreamStartupTimer = window.setTimeout(() => {
+        if (
+            playerState.source === 'google_drive' &&
+            appState.driveStreamBufferingFileId === fileId &&
+            ['connecting', 'buffering'].includes(appState.driveStreamPhase)
+        ) {
+            setStatusMessage(i18n[appState.currentLang].googleDriveStreamStartupSlow, 'error');
+        }
+    }, DRIVE_STREAM_START_TIMEOUT_MS);
+}
+
+function setDriveStreamBuffering(fileId, isBuffering = true, syncStatus = true, phase = '') {
+    const nextFileId = isBuffering ? (fileId || '') : '';
+    const nextPhase = isBuffering ? (phase || 'buffering') : 'idle';
+    appState.driveStreamBufferingFileId = nextFileId;
+    appState.driveStreamPhase = nextPhase;
+    scheduleDriveStreamStartupTimeout(nextFileId, nextPhase);
+    if (nextPhase === 'playing') {
+        scheduleDriveStreamPlayingStatusClear();
+    } else {
+        clearDriveStreamPlayingStatusTimer();
+    }
     if (syncStatus) {
         if (isBuffering && appState.driveStreamBufferingFileId) {
-            setStatusMessage(i18n[appState.currentLang].googleDriveBuffering, 'info');
+            const t = i18n[appState.currentLang];
+            if (nextPhase === 'connecting') {
+                setStatusMessage(t.googleDriveConnecting, 'info');
+            } else if (nextPhase === 'playing') {
+                setStatusMessage(t.googleDrivePlaying, 'success');
+            } else {
+                setStatusMessage(t.googleDriveBuffering, 'info');
+            }
         } else if (playerState.source === 'google_drive') {
             clearStatusMessage();
         }
@@ -297,19 +354,30 @@ audio.addEventListener('pause', () => {
 });
 
 audio.addEventListener('playing', () => {
-    if (playerState.source === 'google_drive' && appState.driveStreamBufferingFileId) {
-        setDriveStreamBuffering('', false, true);
+    if (playerState.source === 'google_drive') {
+        const driveFileId = getCurrentDriveStreamFileId();
+        setDriveStreamBuffering(driveFileId, !!driveFileId, true, 'playing');
     }
 });
 
-['waiting', 'stalled', 'loadstart'].forEach((eventName) => {
+audio.addEventListener('loadstart', () => {
+    if (playerState.source !== 'google_drive') {
+        return;
+    }
+    const driveFileId = getCurrentDriveStreamFileId();
+    if (driveFileId) {
+        setDriveStreamBuffering(driveFileId, true, true, 'connecting');
+    }
+});
+
+['waiting', 'stalled'].forEach((eventName) => {
     audio.addEventListener(eventName, () => {
         if (playerState.source !== 'google_drive') {
             return;
         }
         const driveFileId = getCurrentDriveStreamFileId();
         if (driveFileId) {
-            setDriveStreamBuffering(driveFileId, true, true);
+            setDriveStreamBuffering(driveFileId, true, true, 'buffering');
         }
     });
 });
@@ -337,17 +405,24 @@ function syncLibraryPlayIcons() {
     document.querySelectorAll('.library-quick-stream').forEach(el => {
         el.innerText = t.googleDriveStream || 'Stream';
         el.title = t.googleDriveStreamTooltip || t.googleDriveStream || 'Stream';
-        el.classList.remove('is-active', 'is-buffering');
+        el.classList.remove('is-active', 'is-buffering', 'is-connecting');
         el.setAttribute('aria-pressed', 'false');
         el.setAttribute('aria-busy', 'false');
     });
     if (appState.driveStreamBufferingFileId) {
         const bufferingEl = document.getElementById(buildLibraryPlayButtonId('google_drive', appState.driveStreamBufferingFileId));
         if (bufferingEl) {
-            bufferingEl.innerText = t.googleDriveBufferingShort || 'Buffering...';
-            bufferingEl.title = t.googleDriveBuffering || bufferingEl.innerText;
-            bufferingEl.classList.add('is-buffering');
-            bufferingEl.setAttribute('aria-busy', 'true');
+            if (appState.driveStreamPhase === 'connecting') {
+                bufferingEl.innerText = t.googleDriveConnectingShort || 'Connecting...';
+                bufferingEl.title = t.googleDriveConnecting || bufferingEl.innerText;
+                bufferingEl.classList.add('is-buffering', 'is-connecting');
+                bufferingEl.setAttribute('aria-busy', 'true');
+            } else if (appState.driveStreamPhase === 'buffering') {
+                bufferingEl.innerText = t.googleDriveBufferingShort || 'Buffering...';
+                bufferingEl.title = t.googleDriveBuffering || bufferingEl.innerText;
+                bufferingEl.classList.add('is-buffering');
+                bufferingEl.setAttribute('aria-busy', 'true');
+            }
         }
     }
     if (!audio.paused && playerState.fileName) {
@@ -677,6 +752,7 @@ async function initDrivePlayer(item, autoPlay = true, autoOpenChapters = false) 
         audio.autoplay = false;
         audio.src = playerState.streamUrl;
         audio.load();
+        setDriveStreamBuffering(item.drive_file_id, true, true, 'connecting');
         void requestAudioPlayback(true);
     }
 
@@ -719,6 +795,7 @@ async function initDrivePlayer(item, autoPlay = true, autoOpenChapters = false) 
         audio.src = playerState.streamUrl;
         audio.autoplay = false;
         audio.load();
+        setDriveStreamBuffering(item.drive_file_id, true, true, 'connecting');
     }
     restoreSavedPlaybackPosition(savedBmk);
     syncSharedActivePlayback();

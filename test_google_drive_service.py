@@ -2,6 +2,9 @@ import unittest
 from unittest.mock import patch
 import google_drive_service
 import time
+import os
+import json
+import tempfile
 
 class TestGoogleDriveService(unittest.TestCase):
     @patch('google_drive_service.GOOGLE_DRIVE_CLIENT_ID', 'test_client_id')
@@ -169,5 +172,53 @@ class TestGoogleDriveService(unittest.TestCase):
 
         # Empty file ID
         self.assertEqual(google_drive_service._public_stream_url(""), "")
+
+
+class TestGoogleDriveOAuthStatePersistence(unittest.TestCase):
+    def test_build_auth_url_persists_state_to_disk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = os.path.join(tmp, "oauth_state.json")
+            with patch("google_drive_service.GOOGLE_OAUTH_STATE_FILE", state_file), \
+                 patch("google_drive_service.GOOGLE_DRIVE_CLIENT_ID", "client"), \
+                 patch("google_drive_service.GOOGLE_DRIVE_CLIENT_SECRET", "secret"), \
+                 patch("google_drive_service.GOOGLE_DRIVE_REDIRECT_URI", "http://127.0.0.1/callback"):
+                google_drive_service._oauth_state_store = {}
+                payload = google_drive_service.build_google_drive_auth_url()
+
+            self.assertIn("state", payload)
+            self.assertTrue(os.path.exists(state_file))
+            with open(state_file, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+            self.assertIn(payload["state"], stored.get("states", {}))
+
+    def test_pop_valid_state_works_after_memory_reset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = os.path.join(tmp, "oauth_state.json")
+            now_ts = int(time.time())
+            with open(state_file, "w", encoding="utf-8") as f:
+                json.dump({"states": {"abc": {"created_at": now_ts}}}, f)
+
+            with patch("google_drive_service.GOOGLE_OAUTH_STATE_FILE", state_file):
+                google_drive_service._oauth_state_store = {}
+                payload = google_drive_service._pop_valid_state("abc")
+
+            self.assertIsNotNone(payload)
+            self.assertEqual(int(payload.get("created_at") or 0), now_ts)
+
+    def test_expired_state_pruned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = os.path.join(tmp, "oauth_state.json")
+            now_ts = int(time.time())
+            expired_created_at = now_ts - (google_drive_service.GOOGLE_OAUTH_STATE_TTL_SECONDS + 5)
+            with open(state_file, "w", encoding="utf-8") as f:
+                json.dump({"states": {"expired": {"created_at": expired_created_at}}}, f)
+
+            with patch("google_drive_service.GOOGLE_OAUTH_STATE_FILE", state_file):
+                google_drive_service._oauth_state_store = {}
+                payload = google_drive_service._pop_valid_state("expired")
+
+            self.assertIsNone(payload)
+            self.assertFalse(os.path.exists(state_file))
+
 if __name__ == '__main__':
     unittest.main()

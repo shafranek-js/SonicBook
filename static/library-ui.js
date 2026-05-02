@@ -559,7 +559,10 @@ function playDriveLibraryItem(row, autoPlay = true) {
     const isCurrentDriveBook = playerState.source === 'google_drive' && currentDriveFileId === item.drive_file_id;
 
     if (isCurrentDriveBook) {
-        if (appState.driveStreamBufferingFileId === item.drive_file_id) {
+        if (
+            appState.driveStreamBufferingFileId === item.drive_file_id &&
+            ['connecting', 'buffering'].includes(appState.driveStreamPhase)
+        ) {
             audio.pause();
             audio.removeAttribute('src');
             audio.load();
@@ -573,13 +576,14 @@ function playDriveLibraryItem(row, autoPlay = true) {
             audio.pause();
             return;
         }
+        setDriveStreamBuffering(item.drive_file_id, true, true, 'connecting');
         audio.play().catch(() => {
             setStatusMessage(i18n[appState.currentLang].googleDriveStreamError, 'error');
         });
         return;
     }
 
-    setDriveStreamBuffering(item.drive_file_id, true, true);
+    setDriveStreamBuffering(item.drive_file_id, true, true, 'connecting');
     resetForm();
     appState.step = 'done';
     appState.mainButtonLabelOverride = '';

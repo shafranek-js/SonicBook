@@ -62,42 +62,44 @@ def load_sidecar_metadata(file_path: str) -> dict | None:
 
 
 def _load_library_index() -> dict:
-    if not os.path.exists(LIBRARY_INDEX_FILE):
-        return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
-    try:
-        with open(LIBRARY_INDEX_FILE, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        if not isinstance(payload, dict):
+    with config.locked_json_file(LIBRARY_INDEX_FILE):
+        if not os.path.exists(LIBRARY_INDEX_FILE):
             return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
-        if int(payload.get("version") or 0) != LIBRARY_INDEX_VERSION:
+        try:
+            with open(LIBRARY_INDEX_FILE, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if not isinstance(payload, dict):
+                return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
+            if int(payload.get("version") or 0) != LIBRARY_INDEX_VERSION:
+                return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
+            entries = payload.get("entries")
+            if not isinstance(entries, dict):
+                return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
+            return {"version": LIBRARY_INDEX_VERSION, "entries": entries}
+        except Exception:
+            logger.exception("Failed to read library index: %s", LIBRARY_INDEX_FILE)
             return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
-        entries = payload.get("entries")
-        if not isinstance(entries, dict):
-            return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
-        return {"version": LIBRARY_INDEX_VERSION, "entries": entries}
-    except Exception:
-        logger.exception("Failed to read library index: %s", LIBRARY_INDEX_FILE)
-        return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
 
 
 def _save_library_index(entries: dict):
-    temp_path = LIBRARY_INDEX_FILE + ".tmp"
-    payload = {
-        "version": LIBRARY_INDEX_VERSION,
-        "updated_at": time.time(),
-        "entries": entries,
-    }
-    try:
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(temp_path, LIBRARY_INDEX_FILE)
-    except Exception:
-        logger.exception("Failed to write library index: %s", LIBRARY_INDEX_FILE)
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+    with config.locked_json_file(LIBRARY_INDEX_FILE):
+        temp_path = LIBRARY_INDEX_FILE + ".tmp"
+        payload = {
+            "version": LIBRARY_INDEX_VERSION,
+            "updated_at": time.time(),
+            "entries": entries,
+        }
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            os.replace(temp_path, LIBRARY_INDEX_FILE)
+        except Exception:
+            logger.exception("Failed to write library index: %s", LIBRARY_INDEX_FILE)
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
 
 
 def _build_file_record(name: str, file_path: str, size_bytes: int, mtime: float, sidecar_meta: dict | None):

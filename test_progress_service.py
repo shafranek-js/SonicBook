@@ -1,5 +1,8 @@
 import unittest
 import time
+import os
+import json
+import tempfile
 from unittest.mock import patch
 import progress_service
 
@@ -10,8 +13,21 @@ class TestProgressService(unittest.TestCase):
     """
 
     def setUp(self):
+        self._temp_dir = tempfile.TemporaryDirectory()
+        self._store_file_patcher = patch.object(
+            progress_service,
+            "PROGRESS_STORE_FILE",
+            os.path.join(self._temp_dir.name, "progress_store.json"),
+        )
+        self._store_file_patcher.start()
         # Clear the global store before each test to ensure isolation
         progress_service.progress_store.clear()
+        progress_service._progress_store_dirty = False
+        progress_service._progress_store_last_flush_at = 0.0
+
+    def tearDown(self):
+        self._store_file_patcher.stop()
+        self._temp_dir.cleanup()
 
     def test_create_progress_entry(self):
         """Test basic creation of a progress entry with default fields."""
@@ -157,6 +173,27 @@ class TestProgressService(unittest.TestCase):
         # Verify store remains unchanged
         verified = progress_service.get_progress(task_id)
         self.assertEqual(verified["extra"]["details"], "none")
+
+    def test_progress_store_debounced_flush_and_terminal_force_flush(self):
+        task_id = "task-debounce"
+        with patch.object(progress_service, "PROGRESS_STORE_FLUSH_INTERVAL_SECONDS", 60.0):
+            progress_service.set_progress(task_id, {"status": "downloading", "percent": 0})
+
+            with open(progress_service.PROGRESS_STORE_FILE, "r", encoding="utf-8") as f:
+                first_payload = json.load(f)
+            self.assertEqual(first_payload["tasks"][task_id]["status"], "downloading")
+
+            progress_service.update_progress_entry(task_id, percent=25)
+            with open(progress_service.PROGRESS_STORE_FILE, "r", encoding="utf-8") as f:
+                second_payload = json.load(f)
+            # Debounced write: persisted payload should still be pre-update snapshot.
+            self.assertEqual(second_payload["tasks"][task_id]["percent"], 0)
+
+            progress_service.update_progress_entry(task_id, status="success", percent=100)
+            with open(progress_service.PROGRESS_STORE_FILE, "r", encoding="utf-8") as f:
+                final_payload = json.load(f)
+            self.assertEqual(final_payload["tasks"][task_id]["status"], "success")
+            self.assertEqual(final_payload["tasks"][task_id]["percent"], 100)
 
 if __name__ == "__main__":
     unittest.main()

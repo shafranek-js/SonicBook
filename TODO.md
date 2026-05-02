@@ -212,3 +212,39 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   Keep normal Drive browsing fast via cached snapshots, but expose a manual refresh action so the user can force a live reload whenever needed.
 - [x] 39. **Allow Google Drive folder setup from a shared link:**
   Accept either a raw `folderId` or a full shared Google Drive folder URL in Settings and extract the canonical folder ID automatically before saving it.
+
+## Next Iteration Backlog (April 2026)
+
+### P0 - Stabilization & Security
+- [x] 40. **Fix `.gitignore` runtime-data safety:**
+  Remove corruption and ensure local runtime artifacts (`settings.json`, `bookmarks.json`, `progress_store.json`, `library_index.json`, staging/temp outputs) are ignored to prevent accidental commits.
+- [x] 41. **Harden ZIP extraction safety with tests:**
+  Extend zip path validation coverage (absolute paths, `..` traversal, edge-case separators) to guarantee extraction never escapes the intended directory.
+- [x] 42. **Harden Google OAuth token storage cross-platform:**
+  Keep DPAPI on Windows and add secure keyring-backed storage fallback for macOS/Linux instead of plaintext-equivalent base64 wrapping.
+- [x] 43. **Add startup smoke in CI:**
+  Add a minimal automated smoke check to verify app import/startup plus a basic API route on clean environments.
+
+### P1 - Data Reliability & UX
+- [x] 44. **Introduce a shared locked JSON storage layer:**
+  Centralize read-modify-write with locking for `settings`, `bookmarks`, `library_index`, and `progress_store` to prevent lost updates under concurrent requests.
+- [x] 45. **Reduce progress-store disk churn:**
+  Debounce frequent progress writes and force flush on completion/shutdown so task persistence remains reliable without excessive write pressure.
+- [x] 46. **Make transient runtime state restart-safe:**
+  Persist or gracefully degrade OAuth `state` and preview cache behavior across backend restarts to avoid confusing user-facing failures.
+- [x] 47. **Improve stream startup feedback:**
+  Distinguish `Connecting`, `Buffering`, and `Playing` states in UI and include actionable timeout/error hints when audio does not start immediately.
+
+### P2 - Structural Cleanup & Test Coverage
+- [ ] 48. **Continue `main.py` router extraction:**
+  Finish splitting remaining endpoints into dedicated route modules so `main.py` is lifecycle/composition only.
+- [ ] 49. **Continue `processor.py` pipeline decomposition:**
+  Separate downloading, assembly/transcoding, metadata, and library-move logic to reduce coupling and improve debuggability.
+- [ ] 50. **Replace broad exception handlers in critical paths:**
+  Narrow `except Exception` usage in storage/scraping/pipeline flows and preserve typed errors for clearer logs and API responses.
+- [ ] 51. **Add regression tests for tricky media flows:**
+  Cover direct URL downloads and MPEG-TS -> MP4 -> M4B assembly transitions so recent playback/download regressions do not reappear.
+
+### Optional Performance Exploration
+- [ ] 52. **Evaluate safe multi-connection acceleration for supported sources:**
+  Prototype controlled multi-stream downloading (where protocol/source allows) with strict per-host limits and fallback to single-stream stability.

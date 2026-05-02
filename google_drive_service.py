@@ -24,11 +24,13 @@ GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 GOOGLE_OIDC_SCOPES = "openid email profile"
 GOOGLE_DEFAULT_SCOPES = f"{GOOGLE_DRIVE_SCOPE} {GOOGLE_OIDC_SCOPES}"
 GOOGLE_DRIVE_LIBRARY_CACHE_TTL_SECONDS = 45
+GOOGLE_OAUTH_STATE_TTL_SECONDS = 900
 GOOGLE_DRIVE_PUBLIC_FOLDER_VIEW_URL = "https://drive.google.com/embeddedfolderview"
 GOOGLE_DRIVE_PUBLIC_DOWNLOAD_URLS = (
     "https://drive.usercontent.google.com/download",
     "https://drive.google.com/uc",
 )
+GOOGLE_OAUTH_STATE_FILE = os.path.join(config.BASE_DIR, ".sonicbook-state", "google_oauth_state.json")
 
 GOOGLE_DRIVE_CLIENT_ID = (os.getenv("GOOGLE_DRIVE_CLIENT_ID", "") or "").strip()
 GOOGLE_DRIVE_CLIENT_SECRET = (os.getenv("GOOGLE_DRIVE_CLIENT_SECRET", "") or "").strip()
@@ -71,6 +73,88 @@ MIME_TYPE_BY_EXTENSION = {
 
 def _now_ts():
     return int(time.time())
+
+
+def _normalize_oauth_state_payload(payload: dict | None) -> dict:
+    if isinstance(payload, dict):
+        states = payload.get("states", payload)
+    else:
+        states = {}
+    if not isinstance(states, dict):
+        return {}
+
+    now_ts = _now_ts()
+    normalized = {}
+    for state, state_payload in states.items():
+        if not isinstance(state_payload, dict):
+            continue
+        state_key = str(state or "").strip()
+        created_at = int(state_payload.get("created_at") or 0)
+        if not state_key or created_at <= 0:
+            continue
+        if now_ts - created_at > GOOGLE_OAUTH_STATE_TTL_SECONDS:
+            continue
+        normalized[state_key] = {"created_at": created_at}
+    return normalized
+
+
+def _write_oauth_state_file(states: dict):
+    os.makedirs(os.path.dirname(GOOGLE_OAUTH_STATE_FILE), exist_ok=True)
+    temp_path = GOOGLE_OAUTH_STATE_FILE + ".tmp"
+    payload = {
+        "states": states,
+        "updated_at": _now_ts(),
+    }
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, GOOGLE_OAUTH_STATE_FILE)
+
+
+def _load_oauth_state_store_from_disk() -> dict:
+    with config.locked_json_file(GOOGLE_OAUTH_STATE_FILE):
+        if not os.path.exists(GOOGLE_OAUTH_STATE_FILE):
+            return {}
+        try:
+            with open(GOOGLE_OAUTH_STATE_FILE, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            return {}
+
+        normalized = _normalize_oauth_state_payload(payload)
+        if isinstance(payload, dict):
+            existing = payload.get("states", payload)
+        else:
+            existing = {}
+        if normalized != existing:
+            try:
+                if normalized:
+                    _write_oauth_state_file(normalized)
+                elif os.path.exists(GOOGLE_OAUTH_STATE_FILE):
+                    os.remove(GOOGLE_OAUTH_STATE_FILE)
+            except Exception:
+                pass
+        return normalized
+
+
+def _save_oauth_state_store_to_disk(states: dict):
+    normalized = _normalize_oauth_state_payload({"states": states})
+    with config.locked_json_file(GOOGLE_OAUTH_STATE_FILE):
+        try:
+            if not normalized:
+                if os.path.exists(GOOGLE_OAUTH_STATE_FILE):
+                    os.remove(GOOGLE_OAUTH_STATE_FILE)
+                return
+            _write_oauth_state_file(normalized)
+        except Exception:
+            pass
+
+
+def _refresh_oauth_state_store():
+    global _oauth_state_store
+    _oauth_state_store = _load_oauth_state_store_from_disk()
+
+
+_refresh_oauth_state_store()
 
 
 def is_google_drive_configured():
@@ -131,8 +215,10 @@ def build_google_drive_auth_url():
     if not is_google_drive_configured():
         raise RuntimeError("Google Drive OAuth is not configured.")
 
+    _refresh_oauth_state_store()
     state = secrets.token_urlsafe(32)
     _oauth_state_store[state] = {"created_at": _now_ts()}
+    _save_oauth_state_store_to_disk(_oauth_state_store)
     query = urlencode({
         "client_id": GOOGLE_DRIVE_CLIENT_ID,
         "redirect_uri": GOOGLE_DRIVE_REDIRECT_URI,
@@ -152,10 +238,12 @@ def build_google_drive_auth_url():
 def _pop_valid_state(state):
     if not state:
         return None
+    _refresh_oauth_state_store()
     payload = _oauth_state_store.pop(state, None)
     if not payload:
         return None
-    if _now_ts() - int(payload.get("created_at", 0)) > 900:
+    _save_oauth_state_store_to_disk(_oauth_state_store)
+    if _now_ts() - int(payload.get("created_at", 0)) > GOOGLE_OAUTH_STATE_TTL_SECONDS:
         return None
     return payload
 
