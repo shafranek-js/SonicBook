@@ -5,6 +5,7 @@
 ## ✨ Features
 
 -   **Extreme Speed:** Downloads book fragments in **16 concurrent streams**.
+-   **Safe Multi-Connection Singles:** Large direct single-file downloads can use controlled `Range` segments when the server explicitly supports partial content, with automatic fallback to stable single-stream downloading.
 -   **Integrated Web Player:** Stream your books directly in the browser with **M4B chapter support**, **ZIP playlist sequential playback** (automatically extracts ZIP contents into a hidden folder on-demand for playback), **keyboard shortcuts**, and **Media Session** integration.
 -   **Refined Player Controls:** The built-in player uses standard media-style transport controls and a visually unified chapter button instead of emoji-driven buttons.
 -   **Sleep Timer:** Start a bedtime timer from the toolbar. The timer counts down, resets on user activity, pauses playback after inactivity, can auto-resume playback when activity returns, and dims the screen while the timer is active.
@@ -57,6 +58,12 @@ To run SonicBook correctly, you need the following system components and librari
 5.  If FFmpeg is not in PATH, set `FFMPEG_PATH` and `FFPROBE_PATH` before launch.
 
     You can also place overrides into a local `.env` file in the project root. See [`.env.example`](/C:/Projects/SonicBook/.env.example).
+
+    Optional download tuning:
+    -   `YTDLP_CONCURRENCY`: HLS fragment concurrency for `yt-dlp` sources. Default: `16`.
+    -   `MULTI_CONNECTION_DOWNLOADS`: enables controlled multi-range downloading for large direct single-file sources. Default: `1`.
+    -   `MULTI_CONNECTION_MAX_SEGMENTS`: maximum segments per host for direct single-file downloads. Default: `4`, capped at `8`.
+    -   `MULTI_CONNECTION_MIN_BYTES`: minimum file size before multi-range download is attempted. Default: `67108864`.
 
 6.  Open your browser and navigate to `http://localhost:8000`.
 

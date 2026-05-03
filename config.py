@@ -402,6 +402,9 @@ def save_downloads_dir(path):
 FFMPEG_PATH = os.getenv("FFMPEG_PATH", "ffmpeg")
 FFPROBE_PATH = os.getenv("FFPROBE_PATH", "ffprobe")
 YTDLP_CONCURRENCY = int(os.getenv("YTDLP_CONCURRENCY", "16"))
+MULTI_CONNECTION_DOWNLOADS = os.getenv("MULTI_CONNECTION_DOWNLOADS", "1").strip().lower() not in {"0", "false", "no", "off"}
+MULTI_CONNECTION_MIN_BYTES = max(1, int(os.getenv("MULTI_CONNECTION_MIN_BYTES", str(64 * 1024 * 1024))))
+MULTI_CONNECTION_MAX_SEGMENTS = max(1, min(8, int(os.getenv("MULTI_CONNECTION_MAX_SEGMENTS", "4"))))
 
 
 def ensure_binary_available(binary_name, configured_value, env_var_name):

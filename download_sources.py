@@ -10,6 +10,8 @@ import httpx
 import config
 
 logger = logging.getLogger(__name__)
+_HOST_SEMAPHORES = {}
+_HOST_SEMAPHORES_LOCK = asyncio.Lock()
 
 
 def log_debug(message):
@@ -26,6 +28,51 @@ def parse_content_range_header(value):
         "end": int(end),
         "total": None if total == "*" else int(total),
     }
+
+
+async def get_host_semaphore(url):
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).netloc or "").lower()
+    if not host:
+        return asyncio.Semaphore(1)
+    async with _HOST_SEMAPHORES_LOCK:
+        semaphore = _HOST_SEMAPHORES.get(host)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(config.MULTI_CONNECTION_MAX_SEGMENTS)
+            _HOST_SEMAPHORES[host] = semaphore
+        return semaphore
+
+
+async def probe_multi_connection_download(url):
+    try:
+        async with httpx.AsyncClient(http2=False, follow_redirects=True) as client:
+            response = await client.get(
+                url,
+                headers={"Range": "bytes=0-0"},
+                timeout=httpx.Timeout(15.0, read=30.0),
+            )
+            if response.status_code != 206:
+                return 0
+            content_range = parse_content_range_header(response.headers.get("content-range"))
+            if not content_range or not content_range["total"]:
+                return 0
+            return int(content_range["total"])
+    except (httpx.HTTPError, ValueError) as e:
+        log_debug(f"Multi-connection probe failed, using single stream: {e}")
+        return 0
+
+
+def build_byte_ranges(total_bytes, segments):
+    segment_count = max(1, min(int(segments), int(total_bytes)))
+    base_size = total_bytes // segment_count
+    ranges = []
+    start = 0
+    for index in range(segment_count):
+        end = total_bytes - 1 if index == segment_count - 1 else start + base_size - 1
+        ranges.append((start, end))
+        start = end + 1
+    return ranges
 
 
 async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
@@ -157,7 +204,7 @@ async def download_direct_urls(urls, temp_dir, task_id, progress_callback):
     return merged_file
 
 
-async def download_single_file(url, dest_path, progress_callback):
+async def _download_single_file_stream(url, dest_path, progress_callback):
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     async with httpx.AsyncClient(http2=False, follow_redirects=True) as client:
         async with client.stream("GET", url, timeout=httpx.Timeout(30.0, read=300.0)) as response:
@@ -177,6 +224,114 @@ async def download_single_file(url, dest_path, progress_callback):
                 raise RuntimeError(f"Download incomplete: got {downloaded_bytes} of {total_bytes} bytes")
 
     return dest_path if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0 else None
+
+
+async def _download_single_file_multi_connection(url, dest_path, total_bytes, progress_callback):
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    segment_count = min(
+        config.MULTI_CONNECTION_MAX_SEGMENTS,
+        max(2, total_bytes // config.MULTI_CONNECTION_MIN_BYTES),
+    )
+    ranges = build_byte_ranges(total_bytes, segment_count)
+    part_paths = [f"{dest_path}.part{index}" for index in range(len(ranges))]
+    temp_dest_path = f"{dest_path}.multi"
+    downloaded_bytes = 0
+    progress_lock = asyncio.Lock()
+    host_semaphore = await get_host_semaphore(url)
+
+    async def report_progress(delta):
+        nonlocal downloaded_bytes
+        async with progress_lock:
+            downloaded_bytes += delta
+            percent = round((downloaded_bytes / total_bytes) * 100.0, 3) if total_bytes > 0 else 0.0
+            await progress_callback(percent, downloaded_bytes, total_bytes, phase="downloading")
+
+    async def download_part(client, index, start, end):
+        expected_size = end - start + 1
+        part_path = part_paths[index]
+        async with host_semaphore:
+            async with client.stream(
+                "GET",
+                url,
+                headers={"Range": f"bytes={start}-{end}"},
+                timeout=httpx.Timeout(30.0, read=300.0),
+            ) as response:
+                if response.status_code != 206:
+                    raise RuntimeError(f"Range request returned HTTP {response.status_code}")
+                content_range = parse_content_range_header(response.headers.get("content-range"))
+                if not content_range or content_range["start"] != start or content_range["end"] != end:
+                    raise RuntimeError(f"Unexpected Content-Range: {response.headers.get('content-range')}")
+
+                part_bytes = 0
+                async with aiofiles.open(part_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(1024 * 256):
+                        if not chunk:
+                            continue
+                        part_bytes += len(chunk)
+                        await f.write(chunk)
+                        await report_progress(len(chunk))
+
+        if part_bytes != expected_size:
+            raise RuntimeError(f"Incomplete range part {index}: got {part_bytes}, expected {expected_size}")
+
+    try:
+        for path in [*part_paths, temp_dest_path]:
+            if os.path.exists(path):
+                os.remove(path)
+
+        async with httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=len(ranges)),
+            http2=False,
+            follow_redirects=True,
+        ) as client:
+            results = await asyncio.gather(
+                *[
+                    download_part(client, index, start, end)
+                    for index, (start, end) in enumerate(ranges)
+                ],
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise RuntimeError(f"Range segment download failed: {result}") from result
+
+        async with aiofiles.open(temp_dest_path, "wb") as dest_file:
+            for part_path in part_paths:
+                async with aiofiles.open(part_path, "rb") as part_file:
+                    while True:
+                        chunk = await part_file.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        await dest_file.write(chunk)
+
+        if os.path.getsize(temp_dest_path) != total_bytes:
+            raise RuntimeError(f"Combined file size mismatch: got {os.path.getsize(temp_dest_path)}, expected {total_bytes}")
+
+        os.replace(temp_dest_path, dest_path)
+        await progress_callback(100.0, total_bytes, total_bytes, phase="downloading")
+        log_debug(f"Multi-connection download completed with {len(ranges)} segments: {dest_path}")
+        return dest_path
+    except (httpx.HTTPError, OSError, RuntimeError, ValueError) as e:
+        log_debug(f"Multi-connection download failed, falling back to single stream: {e}")
+        return None
+    finally:
+        for path in [*part_paths, temp_dest_path]:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+
+async def download_single_file(url, dest_path, progress_callback):
+    if config.MULTI_CONNECTION_DOWNLOADS:
+        total_bytes = await probe_multi_connection_download(url)
+        if total_bytes >= config.MULTI_CONNECTION_MIN_BYTES:
+            result = await _download_single_file_multi_connection(url, dest_path, total_bytes, progress_callback)
+            if result:
+                return result
+
+    return await _download_single_file_stream(url, dest_path, progress_callback)
 
 
 async def _handle_direct_urls_download(m3u8_url, task_work_dir, task_id, progress_callback):

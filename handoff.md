@@ -35,6 +35,7 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 
 -   **`download_sources.py` (Download Sources):**
     -   Provides source acquisition for direct MP3 URL lists, direct ZIP URLs, and yt-dlp/HLS sources, returning staged source files for the processor assembly pipeline.
+    -   Large direct single-file sources can use controlled multi-range downloading after a `Range: bytes=0-0` probe proves partial-content support; failures fall back to single-stream downloading.
 
 -   **`media_assembly.py` (Media Assembly):**
     -   Provides M4B chapter assembly and ZIP chapter splitting, while `processor.py` keeps compatibility wrappers for existing tests and call sites.
