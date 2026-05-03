@@ -9,6 +9,11 @@ let driveStreamPlayingStatusTimer = null;
 const DRIVE_STREAM_START_TIMEOUT_MS = 15000;
 const SLEEP_TIMER_DEFAULT_MINUTES = 60;
 const SLEEP_TIMER_IDLE_POLL_MS = 5000;
+const SLEEP_TIMER_DIM_TARGET = 0;
+const SLEEP_TIMER_ACTIVE_BRIGHTNESS = 50;
+const SLEEP_TIMER_DIM_DURATION_MS = 5000;
+const SLEEP_TIMER_BRIGHTEN_DURATION_MS = 800;
+const SLEEP_TIMER_ACTIVITY_BRIGHT_HOLD_MS = 3000;
 const SLEEP_TIMER_ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'];
 let sleepTimerInterval = null;
 let sleepTimerDeadlineAt = 0;
@@ -18,6 +23,11 @@ let sleepTimerIdlePollInFlight = false;
 let sleepTimerSystemIdleSupported = null;
 let sleepTimerPausedPlayback = false;
 let sleepTimerResumeScheduled = false;
+let sleepTimerBrightnessSupported = null;
+let sleepTimerBrightnessCurrent = null;
+let sleepTimerBrightnessAnimationId = 0;
+let sleepTimerBrightnessActivityId = 0;
+let sleepTimerVisualDimEl = null;
 
 function toFiniteNumber(value, fallback = 0) {
     const numeric = Number(value);
@@ -72,6 +82,160 @@ function stopSleepTimerTicker() {
     }
 }
 
+function sleepTimerDelay(ms) {
+    return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+async function ensureSleepTimerBrightnessSupported() {
+    if (sleepTimerBrightnessSupported === false) {
+        return false;
+    }
+    if (sleepTimerBrightnessSupported === true && Number.isFinite(sleepTimerBrightnessCurrent)) {
+        return true;
+    }
+    try {
+        const res = await fetch('/api/system/brightness', { cache: 'no-store' });
+        if (!res.ok) {
+            throw new Error(`Brightness check failed: ${res.status}`);
+        }
+        const data = await res.json();
+        const level = Number(data.level);
+        sleepTimerBrightnessSupported = Boolean(data.supported) && Number.isFinite(level);
+        sleepTimerBrightnessCurrent = sleepTimerBrightnessSupported ? level : null;
+        return sleepTimerBrightnessSupported;
+    } catch (e) {
+        sleepTimerBrightnessSupported = false;
+        return false;
+    }
+}
+
+async function setSleepTimerBrightness(level) {
+    if (sleepTimerBrightnessSupported === false) {
+        return false;
+    }
+    const safeLevel = Math.max(0, Math.min(100, Math.round(Number(level) || 0)));
+    try {
+        const res = await fetch('/api/system/brightness', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ level: safeLevel })
+        });
+        if (!res.ok) {
+            throw new Error(`Brightness update failed: ${res.status}`);
+        }
+        const data = await res.json();
+        if (!data.supported) {
+            sleepTimerBrightnessSupported = false;
+            return false;
+        }
+        sleepTimerBrightnessSupported = true;
+        sleepTimerBrightnessCurrent = safeLevel;
+        return true;
+    } catch (e) {
+        sleepTimerBrightnessSupported = false;
+        return false;
+    }
+}
+
+function getSleepTimerVisualDimEl() {
+    if (sleepTimerVisualDimEl) {
+        return sleepTimerVisualDimEl;
+    }
+    sleepTimerVisualDimEl = document.createElement('div');
+    sleepTimerVisualDimEl.setAttribute('aria-hidden', 'true');
+    sleepTimerVisualDimEl.style.position = 'fixed';
+    sleepTimerVisualDimEl.style.inset = '0';
+    sleepTimerVisualDimEl.style.background = '#000';
+    sleepTimerVisualDimEl.style.opacity = '0';
+    sleepTimerVisualDimEl.style.pointerEvents = 'none';
+    sleepTimerVisualDimEl.style.zIndex = '2147483647';
+    document.body.appendChild(sleepTimerVisualDimEl);
+    return sleepTimerVisualDimEl;
+}
+
+function setSleepTimerVisualBrightness(level, durationMs) {
+    const safeLevel = Math.max(0, Math.min(100, Math.round(Number(level) || 0)));
+    const overlay = getSleepTimerVisualDimEl();
+    const targetOpacity = String((100 - safeLevel) / 100);
+    const transitionMs = Math.max(0, Number(durationMs) || 0);
+    const currentOpacity = window.getComputedStyle(overlay).opacity || overlay.style.opacity || '0';
+    overlay.style.transition = 'none';
+    overlay.style.opacity = currentOpacity;
+    void overlay.offsetHeight;
+    window.requestAnimationFrame(() => {
+        if (overlay !== sleepTimerVisualDimEl) {
+            return;
+        }
+        overlay.style.transition = `opacity ${transitionMs}ms linear`;
+        overlay.style.opacity = targetOpacity;
+    });
+}
+
+function clearSleepTimerVisualDimming() {
+    if (!sleepTimerVisualDimEl) {
+        return;
+    }
+    sleepTimerVisualDimEl.remove();
+    sleepTimerVisualDimEl = null;
+}
+
+function clearSleepTimerDimming(restoreSystemBrightness = true) {
+    sleepTimerBrightnessActivityId++;
+    sleepTimerBrightnessAnimationId++;
+    clearSleepTimerVisualDimming();
+    if (restoreSystemBrightness && sleepTimerBrightnessSupported === true) {
+        void setSleepTimerBrightness(SLEEP_TIMER_ACTIVE_BRIGHTNESS);
+    }
+}
+
+async function animateSleepTimerBrightness(targetLevel, durationMs) {
+    const animationId = ++sleepTimerBrightnessAnimationId;
+    const brightnessSupported = await ensureSleepTimerBrightnessSupported();
+    if (animationId !== sleepTimerBrightnessAnimationId) {
+        return;
+    }
+    if (!brightnessSupported) {
+        setSleepTimerVisualBrightness(targetLevel, durationMs);
+        return;
+    }
+    const startLevel = Number.isFinite(sleepTimerBrightnessCurrent)
+        ? sleepTimerBrightnessCurrent
+        : SLEEP_TIMER_ACTIVE_BRIGHTNESS;
+    const safeTarget = Math.max(0, Math.min(100, Math.round(Number(targetLevel) || 0)));
+    const steps = Math.max(1, Math.ceil(durationMs / 1000));
+    for (let step = 1; step <= steps; step++) {
+        await sleepTimerDelay(durationMs / steps);
+        if (animationId !== sleepTimerBrightnessAnimationId) {
+            return;
+        }
+        const progress = step / steps;
+        const level = Math.round(startLevel + (safeTarget - startLevel) * progress);
+        if (!await setSleepTimerBrightness(level)) {
+            setSleepTimerVisualBrightness(safeTarget, durationMs * (1 - progress));
+            return;
+        }
+    }
+}
+
+function dimScreenForSleepTimer() {
+    sleepTimerBrightnessActivityId++;
+    void animateSleepTimerBrightness(SLEEP_TIMER_DIM_TARGET, SLEEP_TIMER_DIM_DURATION_MS);
+}
+
+function brightenScreenForSleepTimer(thenDim = false) {
+    const activityId = ++sleepTimerBrightnessActivityId;
+    void (async () => {
+        await animateSleepTimerBrightness(SLEEP_TIMER_ACTIVE_BRIGHTNESS, SLEEP_TIMER_BRIGHTEN_DURATION_MS);
+        if (!thenDim) {
+            return;
+        }
+        await sleepTimerDelay(SLEEP_TIMER_ACTIVITY_BRIGHT_HOLD_MS);
+        if (activityId === sleepTimerBrightnessActivityId && appState.sleepTimer.enabled) {
+            dimScreenForSleepTimer();
+        }
+    })();
+}
+
 async function syncSleepTimerWithSystemIdle(force = false) {
     if (!appState.sleepTimer.enabled || sleepTimerIdlePollInFlight) {
         return false;
@@ -120,7 +284,7 @@ async function syncSleepTimerWithSystemIdle(force = false) {
     }
 }
 
-function setSleepTimerEnabled(enabled, announce = false) {
+function setSleepTimerEnabled(enabled, announce = false, dimOnEnable = true) {
     const nextEnabled = Boolean(enabled);
     appState.sleepTimer.enabled = nextEnabled;
     if (nextEnabled) {
@@ -129,6 +293,9 @@ function setSleepTimerEnabled(enabled, announce = false) {
         resetSleepTimerCountdown();
         void syncSleepTimerWithSystemIdle(true);
         startSleepTimerTicker();
+        if (dimOnEnable) {
+            dimScreenForSleepTimer();
+        }
         if (announce) {
             setStatusMessage(i18n[appState.currentLang].sleepTimerActive, 'info');
         }
@@ -168,7 +335,7 @@ async function resumePlaybackAfterSleepTimer() {
             return;
         }
         sleepTimerPausedPlayback = false;
-        setSleepTimerEnabled(true, false);
+        setSleepTimerEnabled(true, false, false);
         if (audio.paused) {
             await requestAudioPlayback(playerState.source === 'google_drive');
         }
@@ -200,6 +367,7 @@ function tickSleepTimer() {
 function handleSleepTimerActivity(event) {
     if (!appState.sleepTimer.enabled) {
         if (sleepTimerPausedPlayback) {
+            brightenScreenForSleepTimer(true);
             void resumePlaybackAfterSleepTimer();
         }
         return;
@@ -210,10 +378,15 @@ function handleSleepTimerActivity(event) {
     }
     sleepTimerLastActivityAt = now;
     resetSleepTimerCountdown();
+    brightenScreenForSleepTimer(true);
 }
 
 function toggleSleepTimer() {
-    setSleepTimerEnabled(!appState.sleepTimer.enabled, false);
+    const shouldEnable = !appState.sleepTimer.enabled;
+    setSleepTimerEnabled(shouldEnable, false);
+    if (!shouldEnable) {
+        clearSleepTimerDimming(true);
+    }
 }
 
 function handleSleepTimerDurationChange() {
@@ -602,6 +775,10 @@ audio.addEventListener('play', () => {
 });
 
 audio.addEventListener('pause', () => {
+    if (appState.sleepTimer.enabled) {
+        setSleepTimerEnabled(false, false);
+    }
+    clearSleepTimerDimming(true);
     setPlayButtonState(false);
     syncLibraryPlayIcons();
     scheduleBookmarkSync(true);
