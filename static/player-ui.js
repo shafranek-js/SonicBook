@@ -16,6 +16,8 @@ let sleepTimerLastActivityAt = 0;
 let sleepTimerNextIdlePollAt = 0;
 let sleepTimerIdlePollInFlight = false;
 let sleepTimerSystemIdleSupported = null;
+let sleepTimerPausedPlayback = false;
+let sleepTimerResumeScheduled = false;
 
 function toFiniteNumber(value, fallback = 0) {
     const numeric = Number(value);
@@ -144,13 +146,34 @@ function setSleepTimerEnabled(enabled, announce = false) {
 }
 
 function pausePlaybackForSleepTimer() {
+    const shouldResumeOnActivity = !audio.paused && Boolean(audio.src);
     setSleepTimerEnabled(false, false);
+    sleepTimerPausedPlayback = shouldResumeOnActivity;
     if (!audio.paused) {
         audio.pause();
     }
     setPlayButtonState(false);
     syncLibraryPlayIcons();
     setStatusMessage(i18n[appState.currentLang].sleepTimerStopped, 'info');
+}
+
+async function resumePlaybackAfterSleepTimer() {
+    if (!sleepTimerPausedPlayback || sleepTimerResumeScheduled) {
+        return;
+    }
+    sleepTimerResumeScheduled = true;
+    window.setTimeout(async () => {
+        sleepTimerResumeScheduled = false;
+        if (!sleepTimerPausedPlayback || !audio.src) {
+            return;
+        }
+        sleepTimerPausedPlayback = false;
+        setSleepTimerEnabled(true, false);
+        if (audio.paused) {
+            await requestAudioPlayback(playerState.source === 'google_drive');
+        }
+        setStatusMessage(i18n[appState.currentLang].sleepTimerResumed, 'info');
+    }, 250);
 }
 
 function tickSleepTimer() {
@@ -176,6 +199,9 @@ function tickSleepTimer() {
 
 function handleSleepTimerActivity(event) {
     if (!appState.sleepTimer.enabled) {
+        if (sleepTimerPausedPlayback) {
+            void resumePlaybackAfterSleepTimer();
+        }
         return;
     }
     const now = Date.now();
@@ -187,7 +213,7 @@ function handleSleepTimerActivity(event) {
 }
 
 function toggleSleepTimer() {
-    setSleepTimerEnabled(!appState.sleepTimer.enabled, true);
+    setSleepTimerEnabled(!appState.sleepTimer.enabled, false);
 }
 
 function handleSleepTimerDurationChange() {
