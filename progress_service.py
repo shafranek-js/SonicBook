@@ -40,7 +40,7 @@ def _load_progress_store_from_disk() -> dict:
             with open(PROGRESS_STORE_FILE, "r", encoding="utf-8") as f:
                 payload = json.load(f)
             return _normalize_progress_payload(payload)
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             logger.warning("Failed to load persisted progress store", exc_info=True)
             return {}
 
@@ -58,7 +58,7 @@ def _write_progress_store_snapshot(snapshot: dict) -> bool:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             os.replace(temp_path, PROGRESS_STORE_FILE)
             return True
-        except Exception:
+        except (OSError, TypeError, ValueError):
             logger.warning("Failed to persist progress store", exc_info=True)
             if os.path.exists(temp_path):
                 try:

@@ -7,6 +7,7 @@
 -   **Extreme Speed:** Downloads book fragments in **16 concurrent streams**.
 -   **Integrated Web Player:** Stream your books directly in the browser with **M4B chapter support**, **ZIP playlist sequential playback** (automatically extracts ZIP contents into a hidden folder on-demand for playback), **keyboard shortcuts**, and **Media Session** integration.
 -   **Refined Player Controls:** The built-in player uses standard media-style transport controls and a visually unified chapter button instead of emoji-driven buttons.
+-   **Sleep Timer:** Start a bedtime timer from the toolbar. The timer counts down, resets on user activity, pauses playback after inactivity, can auto-resume playback when activity returns, and dims the screen while the timer is active.
 -   **Visual Playback Progress:** Watch your progress in real-time with matching indigo background fills in both the chapter panel and the library list, plus dynamic chapter timers.
 -   **Smart Library:** Manage and browse all your downloads in a sleek sliding side panel. Selecting a book restores playback and auto-opens the chapter panel when metadata is available.
 -   **Smart Bookmarks:** Automatically saves your playback position and current track to pick up exactly where you left off.
@@ -84,6 +85,23 @@ Notes:
 -   The default redirect URI is `http://127.0.0.1:8000/api/google-drive/auth/callback`
 -   The Google OAuth client must allow that redirect URI
 -   Google Drive features stay disabled until these variables are configured
+
+## 🌙 Sleep Timer
+
+The toolbar sleep timer is designed for bedtime listening.
+
+-   Click the timer button to enable or disable the timer.
+-   Choose a duration from the dropdown. The `1m` option is currently included for quick testing.
+-   The visible countdown resets whenever SonicBook detects user activity.
+-   On Windows, SonicBook also checks system idle time through the local backend, so activity outside the browser can reset the timer when the OS exposes that signal.
+-   If the timer expires, playback pauses. If the timer caused the pause, the next user activity resumes playback and restarts the timer.
+-   While the timer is active, SonicBook tries to dim the display gradually. If system brightness control is unavailable, the app falls back to a black overlay inside the SonicBook browser window.
+-   Pausing playback manually or turning the timer off clears the dimming overlay.
+
+Brightness notes:
+-   Built-in Windows displays may support brightness control through WMI/CIM.
+-   External monitors often do not expose brightness this way; SonicBook then falls back to in-window dimming.
+-   Browser-only clients cannot change monitor brightness directly, so all system brightness control goes through the local FastAPI backend.
 
 ## 🔁 Cover Backfill
 

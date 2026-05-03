@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import base64
+import binascii
 import html
 import os
 import time
@@ -10,9 +11,9 @@ import copy
 import threading
 import httpx
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 from urllib.parse import urljoin, urlparse, parse_qs, unquote
-from processor import sanitize_filename
+from media_helpers import sanitize_filename
 import config
 
 logger = logging.getLogger(__name__)
@@ -57,13 +58,13 @@ async def init_browser():
             playwright_instance = await async_playwright().start()
             browser_instance = await playwright_instance.chromium.launch(headless=True)
             browser_start_error = ""
-        except Exception as e:
+        except (PlaywrightError, OSError, RuntimeError) as e:
             browser_start_error = describe_playwright_issue(e)
             logger.exception("Persistent Playwright browser initialization failed: %s", browser_start_error)
             if playwright_instance:
                 try:
                     await playwright_instance.stop()
-                except Exception:
+                except (PlaywrightError, OSError, RuntimeError):
                     pass
             playwright_instance = None
             browser_instance = None
@@ -186,7 +187,7 @@ def _save_preview_cache_to_disk():
                     os.remove(PREVIEW_CACHE_FILE)
                 return
             _write_preview_cache_file(snapshot)
-        except Exception:
+        except (OSError, TypeError, ValueError):
             logger.warning("Failed to persist preview cache", exc_info=True)
 
 
@@ -198,7 +199,7 @@ def _load_preview_cache_from_disk():
             try:
                 with open(PREVIEW_CACHE_FILE, "r", encoding="utf-8") as f:
                     payload = json.load(f)
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 entries = {}
             else:
                 if isinstance(payload, dict):
@@ -212,7 +213,7 @@ def _load_preview_cache_from_disk():
                     _write_preview_cache_file(pruned)
                 elif os.path.exists(PREVIEW_CACHE_FILE):
                     os.remove(PREVIEW_CACHE_FILE)
-            except Exception:
+            except (OSError, TypeError, ValueError):
                 logger.warning("Failed to rewrite preview cache", exc_info=True)
 
     with _preview_cache_lock:
@@ -280,7 +281,8 @@ def parse_time_to_seconds(time_str):
         parts = time_str.split(":")
         if len(parts) == 2: return int(parts[0]) * 60 + int(parts[1])
         if len(parts) == 3: return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-    except: pass
+    except (AttributeError, TypeError, ValueError):
+        pass
     return 0
 
 def extract_cover_url(soup, page_url):
@@ -376,7 +378,7 @@ def extract_audioboo_zip_url(html_content: str, page_url: str) -> str | None:
             normalized = html.unescape(decoded).strip()
             if normalized.startswith("http://") or normalized.startswith("https://"):
                 return normalized
-        except Exception:
+        except (binascii.Error, UnicodeDecodeError, ValueError):
             continue
 
     return None
@@ -415,7 +417,7 @@ async def _parse_knigavuhe(book_url):
                     log_debug(f"Knigavuhe: Found {len(direct_urls)} tracks")
                     res["m3u8"] = "DIRECT_URLS:" + ",".join(direct_urls)
                     return res["m3u8"], res["title"], res["chapters"], res["cover"]
-    except Exception as e:
+    except (httpx.HTTPError, json.JSONDecodeError, OSError, TypeError, ValueError, re.error) as e:
         log_debug(f"Knigavuhe parse error: {e}")
     return None, "audiobook", [], None
 
@@ -438,7 +440,7 @@ async def _parse_text_based(book_url, res):
                 res["cover"] = extract_cover_url(soup, book_url)
                     
                 res["chapters"] = extract_chapters_from_html(resp.text)
-    except Exception as e:
+    except (httpx.HTTPError, OSError, TypeError, ValueError) as e:
         log_debug(f"BS4 parse error: {e}")
 
 async def _extract_playwright_data(page, res, book_url):
@@ -454,7 +456,8 @@ async def _extract_playwright_data(page, res, book_url):
             try:
                 await page.evaluate("document.querySelector('.button__player--play, .js-player-play')?.click()")
                 log_debug("Play clicked via JS")
-            except: pass
+            except (PlaywrightError, RuntimeError):
+                pass
         await asyncio.sleep(1)
 
     if not res["chapters"]:
@@ -524,7 +527,7 @@ async def _parse_browser_based(book_url, res):
             try:
                 context = await browser_instance.new_context()
                 page = await context.new_page()
-            except Exception as e:
+            except (PlaywrightError, OSError, RuntimeError) as e:
                 log_debug(f"Persistent browser context failed, attempting respawn: {e}")
                 await close_browser()
                 await init_browser()
@@ -547,7 +550,7 @@ async def _parse_browser_based(book_url, res):
                 await _extract_playwright_data(page, res, book_url)
 
                 await browser.close()
-    except Exception as e:
+    except (PlaywrightError, OSError, RuntimeError) as e:
         playwright_failure = describe_playwright_issue(e)
         logger.exception("Playwright scraping failed: %s", playwright_failure)
 
@@ -593,7 +596,7 @@ async def get_book_info(book_url):
                         res["m3u8"] = f"DIRECT_ZIP:{zip_url}"
                         _cache_book_info(book_url, res["m3u8"], res["title"], [], res["cover"])
                         return res["m3u8"], res["title"], [], res["cover"]
-        except Exception as e:
+        except (httpx.HTTPError, OSError, TypeError, ValueError) as e:
             log_debug(f"Audioboo parse error: {e}")
             return None, "audiobook", [], None
 

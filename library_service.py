@@ -36,7 +36,7 @@ def get_file_duration_seconds(file_path: str):
             return None
         duration = float((result.stdout or "").strip() or 0)
         return round(duration, 2) if duration > 0 else None
-    except Exception:
+    except (subprocess.TimeoutExpired, OSError, ValueError):
         return None
 
 
@@ -52,7 +52,7 @@ def load_sidecar_metadata_from_path(json_path: str) -> dict | None:
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         logger.exception("Failed to read sidecar metadata: %s", json_path)
         return None
 
@@ -76,7 +76,7 @@ def _load_library_index() -> dict:
             if not isinstance(entries, dict):
                 return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
             return {"version": LIBRARY_INDEX_VERSION, "entries": entries}
-        except Exception:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
             logger.exception("Failed to read library index: %s", LIBRARY_INDEX_FILE)
             return {"version": LIBRARY_INDEX_VERSION, "entries": {}}
 
@@ -93,7 +93,7 @@ def _save_library_index(entries: dict):
             with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             os.replace(temp_path, LIBRARY_INDEX_FILE)
-        except Exception:
+        except (OSError, TypeError, ValueError):
             logger.exception("Failed to write library index: %s", LIBRARY_INDEX_FILE)
             if os.path.exists(temp_path):
                 try:

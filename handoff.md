@@ -27,6 +27,27 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
     -   **Multi-layout support:** Optimized to handle various `akniga.org` page templates (standard and legacy).
     -   Falls back to **Playwright (Chromium)** for JS-heavy sites, incorporating an independent self-healing context pool to recover gracefully from browser crashes or external process termination.
 
+-   **`media_helpers.py` (Shared Media Helpers):**
+    -   Provides filename sanitization and cover-extension inference shared by scraping and processing code without coupling those layers to each other.
+
+-   **`ffmpeg_helpers.py` (FFmpeg Helpers):**
+    -   Provides FFprobe duration reads, FFmpeg progress parsing, and bounded FFmpeg execution helpers used by the processing pipeline.
+
+-   **`download_sources.py` (Download Sources):**
+    -   Provides source acquisition for direct MP3 URL lists, direct ZIP URLs, and yt-dlp/HLS sources, returning staged source files for the processor assembly pipeline.
+
+-   **`media_assembly.py` (Media Assembly):**
+    -   Provides M4B chapter assembly and ZIP chapter splitting, while `processor.py` keeps compatibility wrappers for existing tests and call sites.
+
+-   **`media_assets.py` (Media Assets):**
+    -   Downloads and stages cover art for completed local library artifacts.
+
+-   **`library_storage.py` (Library Storage):**
+    -   Provides task work-directory preparation and completed-artifact moves into the configured local library.
+
+-   **`library_finalization.py` (Library Finalization):**
+    -   Provides completed ZIP validation and JSON sidecar generation/move logic for local library artifacts.
+
 -   **`processor.py` (The Heavy Lifter):**
     -   Handles downloading via `yt_dlp` Python API. Concurrency is decoupled and independently configurable via the `YTDLP_CONCURRENCY` environment variable to prevent IP bans.
     -   Provides real-time, throttled progress updates to the frontend.
@@ -50,8 +71,31 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 -   **`index.html` + `static/app.js` + `static/style.css` (Frontend):**
     -   **Symmetric Sliding Panels:** A dynamic 3-panel layout.
     -   **Interactive Player:** Media Session integrations, interactive seeking, variable playback rates, and keyboard shortcuts.
+    -   **Sleep Timer:** Toolbar countdown timer implemented in `static/player-ui.js`; resets on activity, pauses playback after inactivity, auto-resumes when activity returns after a timer-triggered pause, and coordinates screen dimming.
     -   **Adaptive Cover Sizing:** Blur-backed frames ensuring tall covers never cause vertical UI overflow.
     -   **Settings:** Drive configurations and Source Toggles completely native to the client interface.
+
+-   **System UX Endpoints (`routes/system_routes.py`):**
+    -   `/api/system/idle` reads Windows system idle time for sleep-timer reset behavior beyond browser-only activity events.
+    -   `/api/system/brightness` provides best-effort brightness control for sleep-timer dimming through Windows WMI/CIM, with frontend fallback to an in-window black overlay when display control is unsupported.
+
+-   **Bookmark Routes (`routes/bookmark_routes.py`):**
+    -   Owns `/api/bookmarks/*` and `/api/playback/active`, delegating persistence and cross-client playback state to `bookmark_service.py`.
+
+-   **Progress Routes (`routes/progress_routes.py`):**
+    -   Owns `/api/progress/*`, including task polling and SSE streaming, while `progress_service.py` remains the persisted progress state store.
+
+-   **Settings Routes (`routes/settings_routes.py`):**
+    -   Owns `/api/settings/*`, including local library folder selection and playback profile storage status.
+
+-   **Library Routes (`routes/library_routes.py`):**
+    -   Owns `/api/library`, `/api/files/*`, and `/api/metadata/*`, including local path validation, `Range` streaming, and ZIP metadata responses.
+
+-   **Google Drive Routes (`routes/google_drive_routes.py`):**
+    -   Owns `/api/google-drive/*`, including OAuth callback HTML responses, Drive library listing/import, metadata building, stream probing, and `Range` proxy streaming.
+
+-   **Download Routes (`routes/download_routes.py`):**
+    -   Owns `/api/info`, `/api/download`, URL validation, duplicate active-task reuse, and background download orchestration into `processor.run_fast_download()`.
 
 -   **`recover_metadata.py` & `backfill_covers.py` (Utilities):**
     -   Retroactively repair collections locally, strictly relying on asynchronous disk writes (`aiofiles`) to maintain high ingestion speeds without starving the OS.

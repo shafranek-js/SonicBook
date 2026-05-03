@@ -159,6 +159,13 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
 
 - [x] 16. **Preserve playback across mode switches and completed downloads:**
   Do not pause the current book when switching from player mode into download mode with `preservePlayer`, and do not auto-interrupt current playback when a newly downloaded book finishes assembling unless there was no active book already loaded.
+- [x] 53. **Add bedtime sleep timer with dimming and auto-resume:**
+  Add a toolbar sleep timer with visible countdown, activity-based reset, automatic playback pause after inactivity, auto-resume when activity returns after a timer-triggered pause, and gradual screen dimming while the timer is active.
+  Implementation notes:
+  - `static/player-ui.js` owns timer state, activity listeners, countdown rendering, auto-resume, and in-window dimming fallback.
+  - `routes/system_routes.py` exposes `/api/system/idle` for Windows system idle detection and `/api/system/brightness` for best-effort brightness control.
+  - System brightness support is best-effort; unsupported displays fall back to a removable black overlay in the SonicBook window.
+  - The `1m` duration is intentionally present as a temporary testing option and can be removed after manual validation.
 
 ## Google Drive Integration
 
@@ -236,14 +243,18 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   Distinguish `Connecting`, `Buffering`, and `Playing` states in UI and include actionable timeout/error hints when audio does not start immediately.
 
 ### P2 - Structural Cleanup & Test Coverage
-- [ ] 48. **Continue `main.py` router extraction:**
+- [x] 48. **Continue `main.py` router extraction:**
   Finish splitting remaining endpoints into dedicated route modules so `main.py` is lifecycle/composition only.
-- [ ] 49. **Continue `processor.py` pipeline decomposition:**
+  Completed: system UX endpoints (`/api/system/idle`, `/api/system/brightness`) were moved to `routes/system_routes.py`; bookmark and active-playback endpoints were moved to `routes/bookmark_routes.py`; progress polling/SSE endpoints were moved to `routes/progress_routes.py`; settings endpoints were moved to `routes/settings_routes.py`; local library/file/metadata endpoints were moved to `routes/library_routes.py`; Google Drive endpoints were moved to `routes/google_drive_routes.py`; info/download endpoints and background download orchestration were moved to `routes/download_routes.py`; `main.py` is now lifecycle, static shell, and router composition.
+- [x] 49. **Continue `processor.py` pipeline decomposition:**
   Separate downloading, assembly/transcoding, metadata, and library-move logic to reduce coupling and improve debuggability.
-- [ ] 50. **Replace broad exception handlers in critical paths:**
+  Completed: filename/cover helper functions were moved to `media_helpers.py`, removing the `scraper.py -> processor.py` dependency while preserving `processor.sanitize_filename` as an imported compatibility binding. FFmpeg duration/progress helpers were moved to `ffmpeg_helpers.py`, while preserving imported compatibility bindings in `processor.py` for existing tests and callers. Direct URL, direct ZIP, and yt-dlp source download handlers were moved to `download_sources.py`, with compatibility bindings kept in `processor.py` for existing patch points. M4B assembly and ZIP chapter splitting implementation moved to `media_assembly.py`; `processor.create_m4b_with_chapters` remains as a compatibility wrapper for existing mocks. Task staging and library-move helpers were moved to `library_storage.py`, with compatibility bindings kept in `processor.py`. ZIP validation and metadata sidecar generation were moved to `library_finalization.py`. Cover download was moved to `media_assets.py`.
+- [x] 50. **Replace broad exception handlers in critical paths:**
   Narrow `except Exception` usage in storage/scraping/pipeline flows and preserve typed errors for clearer logs and API responses.
-- [ ] 51. **Add regression tests for tricky media flows:**
+  Completed: `processor.py`, `scraper.py`, `library_service.py`, `bookmark_service.py`, and `progress_service.py` now use targeted exception classes for media pipeline, scraping fallback, and JSON/file persistence flows.
+- [x] 51. **Add regression tests for tricky media flows:**
   Cover direct URL downloads and MPEG-TS -> MP4 -> M4B assembly transitions so recent playback/download regressions do not reappear.
+  Completed: `test_processor_downloads.py` now covers direct MP3 URL -> M4B assembly, HLS/MP4 output -> M4B assembly, MP3 transcoding command selection, MP4 copy command selection, and rejection/removal of zero-byte M4B outputs.
 
 ### Optional Performance Exploration
 - [ ] 52. **Evaluate safe multi-connection acceleration for supported sources:**

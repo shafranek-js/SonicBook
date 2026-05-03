@@ -169,7 +169,7 @@ def _load_json_file(path: str):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         return None
 
 
@@ -178,7 +178,7 @@ def _write_marker_file(path: str) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(str(int(time.time())))
-    except Exception:
+    except OSError:
         pass
 
 
@@ -248,7 +248,7 @@ def _save_state(state: dict) -> bool:
             _state_cache = _copy_state(payload)
 
             return True
-        except Exception:
+        except (OSError, TypeError, ValueError):
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
