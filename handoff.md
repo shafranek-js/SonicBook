@@ -8,19 +8,11 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 
 ### Core Components
 
--   **`main.py` (The Entry Point):**
-    -   Serves the FastAPI web application.
-    -   Manages API endpoints:
-        -   `/api/info`: Fetches book metadata.
-        -   `/api/download`: Starts a background download task.
-        -   `/api/progress/{task_id}`: Returns the latest persisted task snapshot.
-        -   `/api/progress/stream/{task_id}`: Streams download/assembly progress over SSE.
-        -   `/api/files/{file_name:path}`: Streams audio files (supports `Range` requests and subdirectories for ZIPs) via optimized `aiofiles` and asynchronous generators.
-        -   `/api/library`: Lists all local downloads.
-        -   `/api/metadata/{file_name}`: Fetches chapter metadata JSON via threaded I/O. For ZIP archives, extracts contents into `.extracted_{base_name}` securely.
-        -   `/api/settings/choose_folder`: Opens a native folder selection dialog (fully isolated in a safe, non-blocking subprocess).
-    -   Maintains an in-memory `progress_store` with timestamp refresh on active writes so long-running jobs are not evicted mid-download.
-    -   Runs a background `cleanup_task` within the FastAPI `lifespan`.
+-   **`main.py` (Application Composition):**
+    -   Serves the static shell and composes the FastAPI application.
+    -   Registers route modules from `routes/`.
+    -   Owns lifecycle startup/shutdown wiring, including Playwright initialization and progress-store flushing.
+    -   Keeps API/business logic out of the entrypoint wherever practical.
 
 -   **`scraper.py` (Metadata Extraction):**
     -   Uses `httpx[http2]` + `BeautifulSoup4` for high-speed parsing.
@@ -50,7 +42,8 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
     -   Provides completed ZIP validation and JSON sidecar generation/move logic for local library artifacts.
 
 -   **`processor.py` (The Heavy Lifter):**
-    -   Handles downloading via `yt_dlp` Python API. Concurrency is decoupled and independently configurable via the `YTDLP_CONCURRENCY` environment variable to prevent IP bans.
+    -   Orchestrates the media pipeline after source acquisition.
+    -   Handles source acquisition via helpers for yt-dlp/HLS, direct MP3 URL lists, and direct ZIP downloads.
     -   Provides real-time, throttled progress updates to the frontend.
     -   Assembles final files (`.m4b`, `.mp3`, or `.zip`) using FFmpeg.
     -   Generates a sidecar `.json` metadata file for each book to enable player navigation.
@@ -63,7 +56,10 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 
 -   **`google_drive_service.py` (Google Drive Integration):**
     -   Handles Google OAuth token exchange and callback status.
-    -   Lists supported audiobooks and proxy-streams media via chunked, buffered `aiofiles` threads to eliminate event-loop starvation during intensive network reads.
+    -   Accepts raw Drive folder IDs and shared Google Drive folder links.
+    -   Lists supported audiobooks from configured folders with short-lived snapshot caching and explicit refresh support.
+    -   Imports selected Drive books into the local library.
+    -   Proxy-streams media through `Range`-aware backend endpoints for remote playback without importing.
 
 -   **`bookmark_service.py` (Persistence & State Tracking):**
     -   Synchronizes playback metadata, last active sessions, and `duration` checkpoints.
@@ -72,9 +68,9 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 -   **`index.html` + `static/app.js` + `static/style.css` (Frontend):**
     -   **Symmetric Sliding Panels:** A dynamic 3-panel layout.
     -   **Interactive Player:** Media Session integrations, interactive seeking, variable playback rates, and keyboard shortcuts.
-    -   **Sleep Timer:** Toolbar countdown timer implemented in `static/player-ui.js`; resets on activity, pauses playback after inactivity, auto-resumes when activity returns after a timer-triggered pause, and coordinates screen dimming.
+    -   **Sleep Timer:** Toolbar countdown timer implemented in `static/player-ui.js`; resets on activity, pauses playback after inactivity, auto-resumes when activity returns after a timer-triggered pause, coordinates screen dimming, and fades audio to zero during the final 60 seconds.
     -   **Adaptive Cover Sizing:** Blur-backed frames ensuring tall covers never cause vertical UI overflow.
-    -   **Settings:** Drive configurations and Source Toggles completely native to the client interface.
+    -   **Settings:** Language, local library folder, sync profile, Google Drive connection/folder, and app-data reset.
 
 -   **System UX Endpoints (`routes/system_routes.py`):**
     -   `/api/system/idle` reads Windows system idle time for sleep-timer reset behavior beyond browser-only activity events.
@@ -98,6 +94,10 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 -   **Download Routes (`routes/download_routes.py`):**
     -   Owns `/api/info`, `/api/download`, URL validation, duplicate active-task reuse, and background download orchestration into `processor.run_fast_download()`.
 
+-   **Source-Specific Scraping:**
+    -   `scraper.py` supports direct metadata extraction, Playwright fallback, and Audioboo ZIP discovery through `DIRECT_ZIP:`.
+    -   Audioboo pages usually do not provide timed chapters; ZIP playback relies on playlist generation from files inside the archive.
+
 -   **`recover_metadata.py` & `backfill_covers.py` (Utilities):**
     -   Retroactively repair collections locally, strictly relying on asynchronous disk writes (`aiofiles`) to maintain high ingestion speeds without starving the OS.
 
@@ -108,7 +108,7 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
 1.  **Python 3.10+** (Recommend 3.11 for improved async stack performance).
 2.  **FFmpeg & FFprobe**: Must be in PATH or exposed via `FFMPEG_PATH` / `FFPROBE_PATH`.
 3.  **Playwright Browsers**: Run `playwright install chromium` prior to usage.
-4.  **Google Drive API** (optional): Setup OAuth strings via internal settings menu or `.env`.
+4.  **Google Drive API** (optional): Setup OAuth strings via `.env` for private Drive folders. Public/shared folders can often be browsed by saving a shared folder link without OAuth.
 
 ---
 
@@ -123,6 +123,7 @@ SonicBook is currently in a hyper-optimized and heavily fortified state followin
 *   **Rapid Bookmark Caching:** Massive reduction in hardware I/O latency; bookmark writes dynamically cache into memory upon parsing and flush to filesystem lazily, accommodating multi-tab high-traffic frontend synchronizations seamlessly.
 *   **Tackled ZipSlip:** Ensured all extracted archive paths strictly adhere to bounded resolution rules, neutralizing Zip Slip directory traversal vulnerabilities.
 *   **Extensive Test Suite Coverage:** Wove a dense net of `IsolatedAsyncioTestCase` units over processing logic, download headers, archive isolation schemas, and bookmark migrations. 
+*   **Bedtime Listening UX:** Sleep timer now combines activity reset, auto-pause, auto-resume, display dimming, and final-minute audio fade-out without changing the user's long-term volume setting.
 
 ### Areas for Future Improvement / Technical Debt:
 1.  **Live Drive Validation:** E2E live Drive integration rests primarily on staging; live QA validation is deferred to real credential injection mapping runs. 
@@ -130,4 +131,4 @@ SonicBook is currently in a hyper-optimized and heavily fortified state followin
 3.  **Advanced Chapter Detection:** FFprobe heuristics currently rely on well-defined embedded markers. Exploring Deep-Learning VAD (Voice Activity Detection) integrations for auto-splitting trackless monolith audio files could heavily bolster the application's unique value offering.
 
 ---
-*Document updated on 16 April 2026.*
+*Document updated on 5 May 2026.*

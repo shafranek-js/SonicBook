@@ -166,6 +166,13 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   - `routes/system_routes.py` exposes `/api/system/idle` for Windows system idle detection and `/api/system/brightness` for best-effort brightness control.
   - System brightness support is best-effort; unsupported displays fall back to a removable black overlay in the SonicBook window.
   - The `1m` duration is intentionally present as a temporary testing option and can be removed after manual validation.
+- [x] 54. **Fade audio out during the final sleep-timer minute:**
+  During the final 60 seconds of an active sleep timer, reduce browser-level `audio.volume` linearly from the user's current level to zero, then pause playback.
+  Implementation notes:
+  - Any user activity during the final minute cancels fade-out, restores the original volume, resets the countdown, and brightens the screen.
+  - Timer-triggered auto-pause leaves volume at zero until the next activity; auto-resume restores the original volume before playback starts again.
+  - Manual timer disable or manual playback pause restores volume and clears dimming.
+  - No new UI was added; fade-out is part of the existing sleep timer.
 
 ## Google Drive Integration
 

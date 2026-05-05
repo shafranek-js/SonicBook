@@ -16,6 +16,7 @@ Already implemented:
 - Shared server-side bookmark sync across Local and Drive
 - Local library metadata indexing for much faster list loading
 - Short-lived Drive snapshot caching plus manual refresh
+- Bedtime sleep timer with activity reset, display dimming, auto-resume, and final-minute audio fade-out
 
 Still intentionally not implemented:
 - Waveform timeline
