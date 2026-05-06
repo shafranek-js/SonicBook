@@ -9,7 +9,7 @@ let driveStreamPlayingStatusTimer = null;
 const DRIVE_STREAM_START_TIMEOUT_MS = 15000;
 const SLEEP_TIMER_DEFAULT_MINUTES = 60;
 const SLEEP_TIMER_IDLE_POLL_MS = 5000;
-const SLEEP_TIMER_DIM_TARGET = 0;
+const SLEEP_TIMER_OVERLAY_DIM_TARGET = 0;
 const SLEEP_TIMER_ACTIVE_BRIGHTNESS = 50;
 const SLEEP_TIMER_DIM_DURATION_MS = 5000;
 const SLEEP_TIMER_BRIGHTEN_DURATION_MS = 800;
@@ -103,6 +103,14 @@ function restoreSleepTimerFadeVolume() {
     audio.volume = clampAudioVolume(sleepTimerFadeOriginalVolume);
 }
 
+function restoreSleepTimerFadeVolumeIfNeeded() {
+    if (sleepTimerFadeOriginalVolume === null) {
+        return false;
+    }
+    cancelSleepTimerFade(true);
+    return true;
+}
+
 function cancelSleepTimerFade(restoreVolume = true) {
     sleepTimerFadeAnimationId++;
     if (restoreVolume) {
@@ -143,6 +151,14 @@ function updateSleepTimerFade(remainingSeconds) {
 
 function sleepTimerDelay(ms) {
     return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function getSleepTimerSystemDimTarget() {
+    if (typeof clampSleepTimerMinBrightness === 'function') {
+        return clampSleepTimerMinBrightness(appState.sleepTimer?.minBrightness);
+    }
+    const numeric = Number(appState.sleepTimer?.minBrightness);
+    return Number.isFinite(numeric) ? Math.max(1, Math.min(100, Math.round(numeric))) : 10;
 }
 
 async function ensureSleepTimerBrightnessSupported() {
@@ -247,14 +263,16 @@ function clearSleepTimerDimming(restoreSystemBrightness = true) {
     }
 }
 
-async function animateSleepTimerBrightness(targetLevel, durationMs) {
+async function animateSleepTimerBrightness(targetLevel, durationMs, visualFallback = true) {
     const animationId = ++sleepTimerBrightnessAnimationId;
     const brightnessSupported = await ensureSleepTimerBrightnessSupported();
     if (animationId !== sleepTimerBrightnessAnimationId) {
         return;
     }
     if (!brightnessSupported) {
-        setSleepTimerVisualBrightness(targetLevel, durationMs);
+        if (visualFallback) {
+            setSleepTimerVisualBrightness(targetLevel, durationMs);
+        }
         return;
     }
     const startLevel = Number.isFinite(sleepTimerBrightnessCurrent)
@@ -270,7 +288,9 @@ async function animateSleepTimerBrightness(targetLevel, durationMs) {
         const progress = step / steps;
         const level = Math.round(startLevel + (safeTarget - startLevel) * progress);
         if (!await setSleepTimerBrightness(level)) {
-            setSleepTimerVisualBrightness(safeTarget, durationMs * (1 - progress));
+            if (visualFallback) {
+                setSleepTimerVisualBrightness(safeTarget, durationMs * (1 - progress));
+            }
             return;
         }
     }
@@ -278,13 +298,15 @@ async function animateSleepTimerBrightness(targetLevel, durationMs) {
 
 function dimScreenForSleepTimer() {
     sleepTimerBrightnessActivityId++;
-    void animateSleepTimerBrightness(SLEEP_TIMER_DIM_TARGET, SLEEP_TIMER_DIM_DURATION_MS);
+    setSleepTimerVisualBrightness(SLEEP_TIMER_OVERLAY_DIM_TARGET, SLEEP_TIMER_DIM_DURATION_MS);
+    void animateSleepTimerBrightness(getSleepTimerSystemDimTarget(), SLEEP_TIMER_DIM_DURATION_MS, false);
 }
 
 function brightenScreenForSleepTimer(thenDim = false) {
     const activityId = ++sleepTimerBrightnessActivityId;
     void (async () => {
-        await animateSleepTimerBrightness(SLEEP_TIMER_ACTIVE_BRIGHTNESS, SLEEP_TIMER_BRIGHTEN_DURATION_MS);
+        setSleepTimerVisualBrightness(SLEEP_TIMER_ACTIVE_BRIGHTNESS, SLEEP_TIMER_BRIGHTEN_DURATION_MS);
+        await animateSleepTimerBrightness(SLEEP_TIMER_ACTIVE_BRIGHTNESS, SLEEP_TIMER_BRIGHTEN_DURATION_MS, false);
         if (!thenDim) {
             return;
         }
@@ -441,6 +463,8 @@ function handleSleepTimerActivity(event) {
         if (sleepTimerPausedPlayback) {
             brightenScreenForSleepTimer(true);
             void resumePlaybackAfterSleepTimer();
+        } else {
+            restoreSleepTimerFadeVolumeIfNeeded();
         }
         return;
     }
@@ -514,6 +538,7 @@ function initSleepTimer() {
         }
     });
     window.addEventListener('focus', () => handleSleepTimerActivity({ type: 'focus' }));
+    window.addEventListener('pageshow', () => handleSleepTimerActivity({ type: 'pageshow' }));
     syncSleepTimerUI();
 }
 
@@ -539,6 +564,7 @@ function restoreSavedPlaybackPosition(savedBmk) {
 }
 
 async function requestAudioPlayback(isDriveStream = false) {
+    restoreSleepTimerFadeVolumeIfNeeded();
     try {
         await audio.play();
     } catch (e) {

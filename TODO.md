@@ -173,6 +173,18 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   - Timer-triggered auto-pause leaves volume at zero until the next activity; auto-resume restores the original volume before playback starts again.
   - Manual timer disable or manual playback pause restores volume and clears dimming.
   - No new UI was added; fade-out is part of the existing sleep timer.
+- [x] 55. **Make sleep-timer brightness dimming safe after laptop sleep:**
+  Add a Settings control for minimum system brightness during sleep-timer dimming, defaulting to `10%`, and use the in-window black overlay for full darkness.
+  Implementation notes:
+  - The configured minimum is stored locally in `localStorage` as `sleep-timer-min-brightness`.
+  - System brightness is clamped to `1-100%` and no longer intentionally drops to `0%`.
+  - Overlay dimming now runs even when system brightness control is supported, so visual darkness does not depend on setting unsafe system brightness.
+- [x] 56. **Restore sleep-timer audio volume after system wake/manual replay:**
+  Guard against the player staying at browser-level `audio.volume = 0` after a timer-triggered pause followed by laptop sleep.
+  Implementation notes:
+  - Restore the pre-fade player volume on focus, visibility return, `pageshow`, and generic activity when no auto-resume is pending.
+  - Restore the pre-fade player volume before any `requestAudioPlayback()` call.
+  - This affects only SonicBook's HTML audio element and never changes system volume.
 
 ## Google Drive Integration
 

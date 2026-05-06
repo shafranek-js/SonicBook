@@ -157,20 +157,23 @@ The toolbar sleep timer is designed for listening before sleep.
 
 - Click the timer button to enable or disable it.
 - Choose a duration from the dropdown. The `1m` option is present for quick testing.
+- In Settings, choose the minimum system brightness for sleep-timer dimming. The default is `10%`.
 - The countdown resets on browser activity such as mouse, keyboard, wheel, touch, scroll, focus, and visibility changes.
 - On Windows, SonicBook also checks system idle time through `/api/system/idle`, so activity outside the browser can reset the timer when available.
 - When the timer expires, playback pauses.
 - If the timer caused the pause, the next user activity auto-resumes playback and restarts the timer.
 - During the final 60 seconds, SonicBook gradually lowers the browser audio element volume to zero.
 - Any activity during that final minute cancels fade-out and restores the original user volume.
+- If the laptop sleeps after timer-triggered pause, SonicBook restores the pre-fade player volume on focus, page show, user activity, or before the next manual playback start.
 - Turning the timer off or pausing playback manually restores volume and clears dimming.
-- While active, SonicBook tries to dim the display over 5 seconds. Unsupported displays fall back to a black overlay inside the SonicBook browser window.
+- While active, SonicBook tries to dim the system display only down to the configured minimum brightness. Full darkness is provided by a black overlay inside the SonicBook browser window.
 
 Brightness notes:
 
 - Built-in Windows displays may support brightness control through WMI/CIM.
 - External monitors often do not expose brightness this way.
 - Browser clients cannot change monitor brightness directly; system brightness control goes through the local backend.
+- SonicBook does not intentionally set system brightness to `0%`; this avoids waking a laptop to an unusably dark login screen after sleep/hibernate.
 
 ## Cover Backfill
 

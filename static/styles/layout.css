@@ -307,6 +307,18 @@ button#mainBtn:disabled { opacity: 0.5; }
 .settings-drive-actions {
     flex-wrap: wrap;
 }
+.settings-number-line {
+    align-items: center;
+}
+.settings-number-input {
+    max-width: 92px;
+    height: 34px;
+    padding: 7px 10px;
+}
+.settings-unit {
+    color: var(--muted);
+    font-size: 0.78rem;
+}
 .settings-row-label {
     font-size: 0.74rem;
     color: var(--muted);
@@ -347,7 +359,8 @@ button#mainBtn:disabled { opacity: 0.5; }
     line-height: 1.45;
     color: var(--muted);
 }
-.settings-menu input#googleDriveFolderInput {
+.settings-menu input#googleDriveFolderInput,
+.settings-menu input#sleepTimerMinBrightnessInput {
     background: rgba(15, 23, 42, 0.62);
 }
 .settings-menu button:disabled,
@@ -461,7 +474,8 @@ button#mainBtn:disabled { opacity: 0.5; }
     color: #b45309;
     background: rgba(245, 158, 11, 0.08);
 }
-.light-theme .settings-menu input#googleDriveFolderInput {
+.light-theme .settings-menu input#googleDriveFolderInput,
+.light-theme .settings-menu input#sleepTimerMinBrightnessInput {
     background: #ffffff;
 }
 .light-theme .sleep-timer-duration {

@@ -91,6 +91,8 @@ const i18n = {
         sleepTimerStopped: "Sleep timer paused playback after inactivity.",
         sleepTimerResumed: "Activity detected. Playback resumed and the sleep timer restarted.",
         sleepTimerDuration: "Sleep timer duration",
+        sleepTimerMinBrightnessLabel: "Sleep timer minimum brightness",
+        sleepTimerMinBrightnessHint: "System brightness will not go below this value; SonicBook uses an in-window overlay for full darkness.",
         chaptersTooltip: "Show or hide chapter list",
         chapterCountShort: "ch",
         resetTooltip: "Reset playback progress",
@@ -174,6 +176,8 @@ const i18n = {
         sleepTimerStopped: "Таймер сна остановил воспроизведение из-за неактивности.",
         sleepTimerResumed: "Активность обнаружена. Воспроизведение продолжено, таймер сна запущен заново.",
         sleepTimerDuration: "Длительность таймера сна",
+        sleepTimerMinBrightnessLabel: "Минимальная яркость таймера",
+        sleepTimerMinBrightnessHint: "Системная яркость не опустится ниже этого значения; полную темноту SonicBook делает оверлеем внутри окна.",
         chaptersTooltip: "Показать или скрыть список глав",
         chapterCountShort: "гл.",
         resetTooltip: "Сбросить прогресс прослушивания",
@@ -182,6 +186,16 @@ const i18n = {
         markUncompletedTooltip: "Снять отметку о завершении"
     }
 };
+
+const SLEEP_TIMER_MIN_BRIGHTNESS_DEFAULT = 10;
+
+function clampSleepTimerMinBrightness(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return SLEEP_TIMER_MIN_BRIGHTNESS_DEFAULT;
+    }
+    return Math.max(1, Math.min(100, Math.round(numeric)));
+}
 
 const appState = {
     currentLang: localStorage.getItem('lang') || 'en',
@@ -215,7 +229,8 @@ const appState = {
     sleepTimer: {
         enabled: false,
         durationMinutes: Number(localStorage.getItem('sleep-timer-minutes')) || 60,
-        remainingSeconds: (Number(localStorage.getItem('sleep-timer-minutes')) || 60) * 60
+        remainingSeconds: (Number(localStorage.getItem('sleep-timer-minutes')) || 60) * 60,
+        minBrightness: clampSleepTimerMinBrightness(localStorage.getItem('sleep-timer-min-brightness'))
     },
     bookmarks: {},
     lastActivePlayback: null,
@@ -533,6 +548,20 @@ function syncPlaybackProfileUI() {
     }
 }
 
+function syncSleepTimerSettingsUI() {
+    const input = document.getElementById('sleepTimerMinBrightnessInput');
+    const label = document.getElementById('t-sleep-timer-min-brightness-label');
+    const hint = document.getElementById('sleepTimerMinBrightnessHint');
+    const t = i18n[appState.currentLang];
+    if (!input || !label || !hint) {
+        return;
+    }
+    appState.sleepTimer.minBrightness = clampSleepTimerMinBrightness(appState.sleepTimer.minBrightness);
+    input.value = String(appState.sleepTimer.minBrightness);
+    label.innerText = t.sleepTimerMinBrightnessLabel;
+    hint.innerText = t.sleepTimerMinBrightnessHint;
+}
+
 function syncMainSurfaceState() {
     const mainCard = document.querySelector('.main-card');
     if (!mainCard) {
@@ -815,6 +844,7 @@ function updateUI() {
     document.getElementById('settingsLangBtn').setAttribute('aria-label', t.langTooltip);
     syncSharedStateIndicator();
     syncPlaybackProfileUI();
+    syncSleepTimerSettingsUI();
     syncGoogleDriveSettingsUI();
     syncLibrarySourceUI();
 
@@ -994,6 +1024,19 @@ function resetAllData() {
         closeSettingsMenu();
         localStorage.clear();
         location.reload();
+    }
+}
+
+function handleSleepTimerMinBrightnessChange() {
+    const input = document.getElementById('sleepTimerMinBrightnessInput');
+    const nextValue = clampSleepTimerMinBrightness(input?.value);
+    appState.sleepTimer.minBrightness = nextValue;
+    localStorage.setItem('sleep-timer-min-brightness', String(nextValue));
+    if (input) {
+        input.value = String(nextValue);
+    }
+    if (appState.sleepTimer.enabled && typeof dimScreenForSleepTimer === 'function') {
+        dimScreenForSleepTimer();
     }
 }
 
