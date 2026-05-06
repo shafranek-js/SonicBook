@@ -1,6 +1,6 @@
 /**
  * @typedef {Object} PlayerState
- * @property {'single'|'zip'} mode
+ * @property {'single'|'m4b'|'zip'} mode
  * @property {number} duration
  * @property {Array<Object>} chapters
  * @property {Array<Object>} playlist
@@ -65,6 +65,44 @@ function toFiniteNumber(value, fallback = 0) {
 
 function hasFiniteDuration(value) {
     return Number.isFinite(value) && value > 0;
+}
+
+function clampPercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return 0;
+    }
+    return Math.max(0, Math.min(100, numeric));
+}
+
+function setTimelineProgress(percent) {
+    const safePercent = clampPercent(percent);
+    const fillEl = document.getElementById('timelineFill');
+    if (fillEl) {
+        fillEl.style.width = `${safePercent}%`;
+    }
+}
+
+function renderTimelineMarkers() {
+    const markersContainer = document.getElementById('markersContainer');
+    if (!markersContainer) {
+        return;
+    }
+    if (playerState.mode !== 'm4b' || playerState.chapters.length === 0 || !hasFiniteDuration(playerState.duration)) {
+        markersContainer.innerHTML = '';
+        return;
+    }
+    markersContainer.innerHTML = playerState.chapters.map(ch =>
+        `<div class="timeline-marker" style="left: ${(toFiniteNumber(ch.start, 0) / playerState.duration) * 100}%;" title="${escapeHtml(ch.title)}"></div>`
+    ).join('');
+}
+
+function resetTimelineVisuals() {
+    setTimelineProgress(0);
+    const markersContainer = document.getElementById('markersContainer');
+    if (markersContainer) {
+        markersContainer.innerHTML = '';
+    }
 }
 
 function getSleepTimerDurationMinutes() {
@@ -830,7 +868,7 @@ function scheduleBookmarkSync(immediate = false) {
 audio.addEventListener('timeupdate', () => {
     if (!playerState.duration) return;
     const pct = (audio.currentTime / playerState.duration) * 100;
-    document.getElementById('timelineFill').style.width = pct + '%';
+    setTimelineProgress(pct);
     document.getElementById('timeCurrent').innerText = formatTime(audio.currentTime);
     const playerChapterEl = document.getElementById('playerChapter');
     if (playerState.mode === 'zip' && playerState.playlist.length > 0) {
@@ -885,11 +923,7 @@ audio.addEventListener('timeupdate', () => {
 audio.addEventListener('loadedmetadata', () => {
     playerState.duration = toFiniteNumber(audio.duration, 0);
     document.getElementById('timeTotal').innerText = formatTime(playerState.duration);
-    if (playerState.mode === 'm4b' && playerState.chapters.length > 0 && hasFiniteDuration(playerState.duration)) {
-        document.getElementById('markersContainer').innerHTML = playerState.chapters.map(ch =>
-            `<div class="timeline-marker" style="left: ${(ch.start / playerState.duration) * 100}%;" title="${ch.title}"></div>`
-        ).join('');
-    }
+    renderTimelineMarkers();
 });
 
 audio.addEventListener('ended', () => {
@@ -1194,7 +1228,7 @@ async function initPlayer(fileName, autoOpenChapters = false, autoPlay = false) 
     appState.showPlayer = true;
     appState.showPreview = false;
     appState.previewLoading = false;
-    document.getElementById('markersContainer').innerHTML = '';
+    resetTimelineVisuals();
     updateUI();
     const playerTitleEl = document.getElementById('playerTitle');
     const playerChapterEl = document.getElementById('playerChapter');
@@ -1202,7 +1236,6 @@ async function initPlayer(fileName, autoOpenChapters = false, autoPlay = false) 
     if (playerChapterEl) playerChapterEl.innerText = '';
     setPanelCount(0);
     setPlayButtonState(false);
-    document.getElementById('timelineFill').style.width = '0%';
     document.getElementById('timeCurrent').innerText = formatTime(0);
     document.getElementById('timeTotal').innerText = formatTime(0);
     const chaptersListEl = document.getElementById('playerChaptersList');
@@ -1301,12 +1334,11 @@ async function initDrivePlayer(item, autoPlay = true, autoOpenChapters = false) 
     appState.showPlayer = true;
     appState.showPreview = false;
     appState.previewLoading = false;
-    document.getElementById('markersContainer').innerHTML = '';
+    resetTimelineVisuals();
     updateUI();
     clearPlayerCover();
     setPanelCount(0);
     setPlayButtonState(false);
-    document.getElementById('timelineFill').style.width = '0%';
     document.getElementById('timeCurrent').innerText = formatTime(0);
     document.getElementById('timeTotal').innerText = formatTime(0);
     const chaptersListEl = document.getElementById('playerChaptersList');

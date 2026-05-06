@@ -288,3 +288,9 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   Add lightweight JSDoc typedefs for core app/player/library/progress state so future Vanilla JS changes have better editor support without enabling global TypeScript checking.
 - [x] 59. **Harden environment variable parsing:**
   Add bounded env parsing helpers for download tuning and FFmpeg path settings so invalid `.env` values log warnings and fall back/clamp instead of crashing with raw `ValueError`.
+
+## Deferred UX Exploration
+
+- [ ] 60. **Evaluate Waveform timeline refactor:**
+  Prototype replacing the current timeline with an audiobook-friendly waveform only if it clearly improves navigation without adding heavy CPU/memory cost, noisy seeking behavior, or visual clutter. Start with a performance/UX spike before committing to product implementation.
+  Status: prototype was tried and reverted because the flat progress bar was clearer for played/remaining state. Keep this open only as a deferred exploration, not as a required feature.
