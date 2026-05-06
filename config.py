@@ -69,6 +69,47 @@ def load_dotenv_file():
 load_dotenv_file()
 
 
+def parse_env_path(name: str, default: str) -> str:
+    value = os.getenv(name, "")
+    normalized = str(value or "").strip()
+    return normalized or default
+
+
+def parse_env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None or str(value).strip() == "":
+        return default
+
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    logger.warning("Invalid boolean value for %s=%r; using default %r", name, value, default)
+    return default
+
+
+def parse_env_int(name: str, default: int, min_value: int | None = None, max_value: int | None = None) -> int:
+    value = os.getenv(name)
+    if value is None or str(value).strip() == "":
+        return default
+
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        logger.warning("Invalid integer value for %s=%r; using default %r", name, value, default)
+        return default
+
+    if min_value is not None and parsed < min_value:
+        logger.warning("Value for %s=%r is below minimum %r; using %r", name, value, min_value, min_value)
+        return min_value
+    if max_value is not None and parsed > max_value:
+        logger.warning("Value for %s=%r is above maximum %r; using %r", name, value, max_value, max_value)
+        return max_value
+    return parsed
+
+
 def _deep_merge(defaults, override):
     if not isinstance(defaults, dict):
         return copy.deepcopy(override)
@@ -399,12 +440,12 @@ def save_downloads_dir(path):
 
 # FFmpeg configuration
 # Defaults rely on PATH, but can be overridden by env variables.
-FFMPEG_PATH = os.getenv("FFMPEG_PATH", "ffmpeg")
-FFPROBE_PATH = os.getenv("FFPROBE_PATH", "ffprobe")
-YTDLP_CONCURRENCY = int(os.getenv("YTDLP_CONCURRENCY", "16"))
-MULTI_CONNECTION_DOWNLOADS = os.getenv("MULTI_CONNECTION_DOWNLOADS", "1").strip().lower() not in {"0", "false", "no", "off"}
-MULTI_CONNECTION_MIN_BYTES = max(1, int(os.getenv("MULTI_CONNECTION_MIN_BYTES", str(64 * 1024 * 1024))))
-MULTI_CONNECTION_MAX_SEGMENTS = max(1, min(8, int(os.getenv("MULTI_CONNECTION_MAX_SEGMENTS", "4"))))
+FFMPEG_PATH = parse_env_path("FFMPEG_PATH", "ffmpeg")
+FFPROBE_PATH = parse_env_path("FFPROBE_PATH", "ffprobe")
+YTDLP_CONCURRENCY = parse_env_int("YTDLP_CONCURRENCY", 16, min_value=1)
+MULTI_CONNECTION_DOWNLOADS = parse_env_bool("MULTI_CONNECTION_DOWNLOADS", True)
+MULTI_CONNECTION_MIN_BYTES = parse_env_int("MULTI_CONNECTION_MIN_BYTES", 64 * 1024 * 1024, min_value=1)
+MULTI_CONNECTION_MAX_SEGMENTS = parse_env_int("MULTI_CONNECTION_MAX_SEGMENTS", 4, min_value=1, max_value=8)
 
 
 def ensure_binary_available(binary_name, configured_value, env_var_name):

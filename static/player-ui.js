@@ -1,3 +1,27 @@
+/**
+ * @typedef {Object} PlayerState
+ * @property {'single'|'zip'} mode
+ * @property {number} duration
+ * @property {Array<Object>} chapters
+ * @property {Array<Object>} playlist
+ * @property {number} currentTrackIndex
+ * @property {string|null} fileName
+ * @property {string} bookTitle
+ * @property {string|null} tempCoverUrl
+ * @property {'local'|'google_drive'} source
+ * @property {string|null} streamUrl
+ * @property {string|null} bookmarkKey
+ * @property {string|null} bookId
+ * @property {string} driveFileId
+ * @property {string} driveMetadataFileId
+ * @property {string} driveCoverFileId
+ * @property {string} driveResourceKey
+ * @property {string} driveMetadataResourceKey
+ * @property {string} driveCoverResourceKey
+ * @property {number} sizeBytes
+ */
+
+/** @type {PlayerState} */
 let playerState = {
     mode: 'single', duration: 0, chapters: [], playlist: [], currentTrackIndex: 0, fileName: null, bookTitle: "", tempCoverUrl: null, source: 'local', streamUrl: null, bookmarkKey: null, bookId: null, driveFileId: '', driveMetadataFileId: '', driveCoverFileId: '', driveResourceKey: '', driveMetadataResourceKey: '', driveCoverResourceKey: '', sizeBytes: 0
 };

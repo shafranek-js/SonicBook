@@ -2,6 +2,22 @@ const driveImportState = new Map();
 const importedDriveBookIds = new Set();
 const DRIVE_IMPORT_RESET_DELAY_MS = 5000;
 
+/**
+ * @typedef {Object} DriveLibraryItem
+ * @property {string} drive_file_id
+ * @property {string} name
+ * @property {string=} book_id
+ * @property {number=} size_bytes
+ * @property {boolean=} streamable
+ * @property {boolean=} isImported
+ * @property {boolean=} isCompleted
+ * @property {string=} resource_key
+ * @property {string=} drive_metadata_file_id
+ * @property {string=} drive_cover_file_id
+ * @property {string=} drive_metadata_resource_key
+ * @property {string=} drive_cover_resource_key
+ */
+
 function getDriveImportState(fileId) {
     return driveImportState.get(fileId) || 'idle';
 }
@@ -228,6 +244,10 @@ function renderLibraryItem(file, t) {
     `;
 }
 
+/**
+ * @param {DriveLibraryItem} file
+ * @param {Object} t
+ */
 function renderDriveLibraryItem(file, t) {
     const date = file.mtime ? new Date(file.mtime * 1000).toLocaleDateString() : '';
     const safeName = escapeHtml(file.name);

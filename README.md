@@ -204,8 +204,11 @@ Useful commands:
 
 ```bash
 python -m pytest -q
+python -m pytest -q test_frontend_e2e.py
 python -m compileall .
 ```
+
+`test_frontend_e2e.py` uses Python Playwright against a temporary local uvicorn server. It does not require Google Drive credentials, a real Drive folder, or an existing audiobook library.
 
 The FastAPI entrypoint is `main.py`. Most API logic lives in route modules under `routes/`, while media work is split across `download_sources.py`, `media_assembly.py`, `media_assets.py`, `library_storage.py`, and `library_finalization.py`.
 

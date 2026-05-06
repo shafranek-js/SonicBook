@@ -189,6 +189,49 @@ const i18n = {
 
 const SLEEP_TIMER_MIN_BRIGHTNESS_DEFAULT = 10;
 
+/**
+ * @typedef {Object} SleepTimerState
+ * @property {boolean} enabled
+ * @property {number} durationMinutes
+ * @property {number} remainingSeconds
+ * @property {number} minBrightness
+ */
+
+/**
+ * @typedef {Object} BookmarkSummaryEntry
+ * @property {number=} time
+ * @property {number=} duration
+ * @property {number=} trackIndex
+ * @property {boolean=} completed
+ */
+
+/**
+ * @typedef {Object.<string, BookmarkSummaryEntry>} BookmarkSummary
+ */
+
+/**
+ * @typedef {Object} AppState
+ * @property {string} currentLang
+ * @property {string} currentMode
+ * @property {'local'|'google_drive'} librarySource
+ * @property {string} step
+ * @property {Object|null} playerReturnState
+ * @property {Object|null} activeDownloadTask
+ * @property {boolean} showPlayer
+ * @property {boolean} showPreview
+ * @property {boolean} previewLoading
+ * @property {boolean} showProgress
+ * @property {string} mainButtonLabelOverride
+ * @property {{visible: boolean, message: string, tone: string}} status
+ * @property {{configured: boolean, connected: boolean, publicLinkMode: boolean, folderId: string, accountEmail: string, accountName: string, loading: boolean, refreshingLibrary: boolean}} googleDrive
+ * @property {string} driveStreamBufferingFileId
+ * @property {string} driveStreamPhase
+ * @property {SleepTimerState} sleepTimer
+ * @property {BookmarkSummary} bookmarks
+ * @property {Object|null} lastActivePlayback
+ * @property {string} sharedStateStatus
+ */
+
 function clampSleepTimerMinBrightness(value) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
@@ -197,6 +240,7 @@ function clampSleepTimerMinBrightness(value) {
     return Math.max(1, Math.min(100, Math.round(numeric)));
 }
 
+/** @type {AppState} */
 const appState = {
     currentLang: localStorage.getItem('lang') || 'en',
     currentMode: localStorage.getItem('mode') || 'm4b',

@@ -279,3 +279,12 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
 - [x] 52. **Evaluate safe multi-connection acceleration for supported sources:**
   Prototype controlled multi-stream downloading (where protocol/source allows) with strict per-host limits and fallback to single-stream stability.
   Completed: HLS remains handled by `yt-dlp` fragment concurrency, direct chapter URLs remain bounded at two concurrent chapter downloads for source stability, and large direct single-file downloads now probe `Range` support before using controlled multi-range segments. Unsupported, small, or failed multi-range attempts automatically fall back to the previous single-stream path. Added `MULTI_CONNECTION_DOWNLOADS`, `MULTI_CONNECTION_MAX_SEGMENTS`, and `MULTI_CONNECTION_MIN_BYTES` tuning knobs plus regression tests for selection/fallback behavior.
+
+## Regression Hardening
+
+- [x] 57. **Add Python Playwright frontend E2E smoke coverage:**
+  Cover app shell startup, library panel, Settings visibility/opacity, sleep timer toggle, minimum brightness persistence, and Local/Drive library source switching without introducing npm or frontend build tooling.
+- [x] 58. **Document frontend state contracts with JSDoc:**
+  Add lightweight JSDoc typedefs for core app/player/library/progress state so future Vanilla JS changes have better editor support without enabling global TypeScript checking.
+- [x] 59. **Harden environment variable parsing:**
+  Add bounded env parsing helpers for download tuning and FFmpeg path settings so invalid `.env` values log warnings and fall back/clamp instead of crashing with raw `ValueError`.

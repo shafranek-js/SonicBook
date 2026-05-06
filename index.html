@@ -18,8 +18,8 @@
                     <span class="library-sync-badge" id="librarySyncBadge">Shared sync</span>
                 </div>
                 <div class="library-source-toggle" id="librarySourceToggle">
-                    <button type="button" class="library-source-btn active" id="librarySourceLocalBtn" onclick="setLibrarySource('local')">Local</button>
-                    <button type="button" class="library-source-btn" id="librarySourceDriveBtn" onclick="setLibrarySource('google_drive')">Drive</button>
+                    <button type="button" class="library-source-btn active" id="librarySourceLocalBtn" data-testid="library-source-local" onclick="setLibrarySource('local')">Local</button>
+                    <button type="button" class="library-source-btn" id="librarySourceDriveBtn" data-testid="library-source-drive" onclick="setLibrarySource('google_drive')">Drive</button>
                     <button type="button" class="library-source-btn library-refresh-btn" id="libraryRefreshBtn" onclick="refreshCurrentLibrary()" title="Refresh" hidden>↻</button>
                 </div>
                 <label class="panel-search" aria-label="Search library">
@@ -52,7 +52,7 @@
                     <button class="btn-icon" id="libBtn" onclick="toggleLibrary()" title="Library">📚</button>
                     <button class="btn-icon" onclick="toggleTheme()" id="themeBtn">🌙</button>
                     <div class="sleep-timer-wrap" id="sleepTimerWrap">
-                        <button class="btn-icon sleep-timer-btn" id="sleepTimerBtn" type="button" onclick="toggleSleepTimer()" title="Sleep timer" aria-label="Sleep timer" aria-pressed="false">
+                        <button class="btn-icon sleep-timer-btn" id="sleepTimerBtn" data-testid="sleep-timer-button" type="button" onclick="toggleSleepTimer()" title="Sleep timer" aria-label="Sleep timer" aria-pressed="false">
                             <span class="sleep-timer-icon" aria-hidden="true">⏲</span>
                             <span class="sleep-timer-countdown timecode" id="sleepTimerCountdown">1:00:00</span>
                         </button>
@@ -68,8 +68,8 @@
                     </div>
                     <button class="btn-icon toolbar-action-btn" id="downloadAnotherBtn" onclick="handleAction()" title="Download another" aria-label="Download another" hidden>⭳</button>
                     <div class="settings-wrap" id="settingsWrap">
-                        <button class="btn-icon settings-btn" id="settingsBtn" onclick="toggleSettingsMenu()" title="Settings" aria-label="Settings" aria-expanded="false" aria-controls="settingsMenu">⚙</button>
-                        <div class="settings-menu" id="settingsMenu" hidden>
+                        <button class="btn-icon settings-btn" id="settingsBtn" data-testid="settings-button" onclick="toggleSettingsMenu()" title="Settings" aria-label="Settings" aria-expanded="false" aria-controls="settingsMenu">⚙</button>
+                        <div class="settings-menu" id="settingsMenu" data-testid="settings-menu" hidden>
                             <div class="settings-menu-title" id="t-settings-title">Settings</div>
                             <div class="settings-row">
                                 <div class="settings-row-label" id="t-language-label">Language</div>
@@ -98,7 +98,7 @@
                             <div class="settings-row">
                                 <div class="settings-row-label" id="t-sleep-timer-min-brightness-label">Sleep timer minimum brightness</div>
                                 <div class="settings-inline-actions settings-number-line">
-                                    <input type="number" class="settings-number-input" id="sleepTimerMinBrightnessInput" min="1" max="100" step="1" value="10" onchange="handleSleepTimerMinBrightnessChange()" aria-label="Sleep timer minimum brightness">
+                                    <input type="number" class="settings-number-input" id="sleepTimerMinBrightnessInput" data-testid="sleep-timer-min-brightness" min="1" max="100" step="1" value="10" onchange="handleSleepTimerMinBrightnessChange()" aria-label="Sleep timer minimum brightness">
                                     <span class="settings-unit">%</span>
                                 </div>
                                 <div class="settings-hint" id="sleepTimerMinBrightnessHint">System brightness will not go below this value; SonicBook uses an in-window overlay for full darkness.</div>

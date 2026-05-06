@@ -1,3 +1,14 @@
+/**
+ * @typedef {Object} ProgressPayload
+ * @property {'processing'|'merging'|'assembling'|'success'|'error'|'not_found'} status
+ * @property {'downloading'|'assembling'|'complete'=} phase
+ * @property {number=} percent
+ * @property {number=} current_frag
+ * @property {number=} total_frags
+ * @property {string=} file_name
+ * @property {string=} message
+ */
+
 function getValidatedBookUrl() {
     const url = document.getElementById('urlInput').value.trim();
     if (!/^https?:\/\/\S+$/i.test(url)) {
@@ -247,6 +258,7 @@ function poll(id) {
     const eventSource = new EventSource('/api/progress/stream/' + id);
     activeProgressEventSource = eventSource;
     eventSource.onmessage = function(event) {
+        /** @type {ProgressPayload} */
         const data = JSON.parse(event.data), t = i18n[appState.currentLang];
         updateActiveDownloadTask({
             id,

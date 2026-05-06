@@ -53,6 +53,7 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
     -   System-level FFmpeg/FFprobe path management.
     -   Concurrency settings for sub-processes.
     -   Root-level `.env` support for local overrides.
+    -   Bounded environment parsing for download tuning and media tool paths, with warnings and safe defaults for invalid local values.
 
 -   **`google_drive_service.py` (Google Drive Integration):**
     -   Handles Google OAuth token exchange and callback status.
@@ -71,6 +72,7 @@ SonicBook is an asynchronous web application built on **FastAPI**. Its primary g
     -   **Sleep Timer:** Toolbar countdown timer implemented in `static/player-ui.js`; resets on activity, pauses playback after inactivity, auto-resumes when activity returns after a timer-triggered pause, coordinates screen dimming, and fades audio to zero during the final 60 seconds.
     -   **Adaptive Cover Sizing:** Blur-backed frames ensuring tall covers never cause vertical UI overflow.
     -   **Settings:** Language, local library folder, sync profile, Google Drive connection/folder, and app-data reset.
+    -   **Frontend Contracts:** Core Vanilla JS state objects now have lightweight JSDoc typedefs for editor support without introducing TypeScript or npm build tooling.
 
 -   **System UX Endpoints (`routes/system_routes.py`):**
     -   `/api/system/idle` reads Windows system idle time for sleep-timer reset behavior beyond browser-only activity events.
@@ -124,6 +126,8 @@ SonicBook is currently in a hyper-optimized and heavily fortified state followin
 *   **Tackled ZipSlip:** Ensured all extracted archive paths strictly adhere to bounded resolution rules, neutralizing Zip Slip directory traversal vulnerabilities.
 *   **Extensive Test Suite Coverage:** Wove a dense net of `IsolatedAsyncioTestCase` units over processing logic, download headers, archive isolation schemas, and bookmark migrations. 
 *   **Bedtime Listening UX:** Sleep timer now combines activity reset, auto-pause, auto-resume, display dimming, and final-minute audio fade-out without changing the user's long-term volume setting.
+*   **Frontend Regression Guardrails:** Python Playwright E2E smoke coverage starts a temporary uvicorn server and verifies the app shell, Settings opacity/content, sleep timer controls, minimum-brightness persistence, and Local/Drive switching without real Google credentials or a real audiobook library.
+*   **Safer Local Configuration:** Environment overrides for FFmpeg paths and download concurrency now use explicit parsing helpers, clamp bounded values, and fall back to defaults instead of crashing on malformed `.env` values.
 
 ### Areas for Future Improvement / Technical Debt:
 1.  **Live Drive Validation:** E2E live Drive integration rests primarily on staging; live QA validation is deferred to real credential injection mapping runs. 
@@ -131,4 +135,4 @@ SonicBook is currently in a hyper-optimized and heavily fortified state followin
 3.  **Advanced Chapter Detection:** FFprobe heuristics currently rely on well-defined embedded markers. Exploring Deep-Learning VAD (Voice Activity Detection) integrations for auto-splitting trackless monolith audio files could heavily bolster the application's unique value offering.
 
 ---
-*Document updated on 5 May 2026.*
+*Document updated on 6 May 2026.*
