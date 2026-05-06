@@ -180,6 +180,7 @@ async function ensureSleepTimerBrightnessSupported() {
         return sleepTimerBrightnessSupported;
     } catch (e) {
         sleepTimerBrightnessSupported = false;
+        sleepTimerBrightnessCurrent = null;
         return false;
     }
 }
@@ -201,6 +202,7 @@ async function setSleepTimerBrightness(level) {
         const data = await res.json();
         if (!data.supported) {
             sleepTimerBrightnessSupported = false;
+            sleepTimerBrightnessCurrent = null;
             return false;
         }
         sleepTimerBrightnessSupported = true;
@@ -208,8 +210,14 @@ async function setSleepTimerBrightness(level) {
         return true;
     } catch (e) {
         sleepTimerBrightnessSupported = false;
+        sleepTimerBrightnessCurrent = null;
         return false;
     }
+}
+
+function resetSleepTimerBrightnessProbe() {
+    sleepTimerBrightnessSupported = null;
+    sleepTimerBrightnessCurrent = null;
 }
 
 function getSleepTimerVisualDimEl() {
@@ -459,6 +467,9 @@ function tickSleepTimer() {
 }
 
 function handleSleepTimerActivity(event) {
+    if (['visibilitychange', 'focus', 'pageshow'].includes(event.type)) {
+        resetSleepTimerBrightnessProbe();
+    }
     if (!appState.sleepTimer.enabled) {
         if (sleepTimerPausedPlayback) {
             brightenScreenForSleepTimer(true);
