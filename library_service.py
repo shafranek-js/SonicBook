@@ -219,3 +219,98 @@ def list_library_book_ids(downloads_dir: str) -> list[str]:
                 book_ids.append(candidate)
 
     return book_ids
+
+
+def delete_library_book(file_name: str, downloads_dir: str | None = None) -> dict:
+    if not file_name:
+        raise ValueError("Invalid file name")
+
+    target_dir = os.path.abspath(downloads_dir or config.DOWNLOADS_DIR)
+    normalized_name = os.path.normpath(file_name)
+    drive, _ = os.path.splitdrive(normalized_name)
+    if drive or os.path.isabs(file_name) or os.path.isabs(normalized_name):
+        raise ValueError("Invalid file path")
+
+    candidate_path = os.path.abspath(os.path.join(target_dir, normalized_name))
+    try:
+        if os.path.commonpath([target_dir, candidate_path]) != target_dir:
+            raise ValueError("Path outside library directory")
+    except ValueError as exc:
+        raise ValueError("Invalid file path") from exc
+
+    if not os.path.exists(candidate_path):
+        raise FileNotFoundError(f"File not found: {file_name}")
+
+    base_name = os.path.splitext(os.path.basename(candidate_path))[0]
+    sidecar_path = _sidecar_json_path(candidate_path)
+    entry_key = os.path.basename(candidate_path)
+
+    # 1. Load sidecar metadata if present to extract cover and aliases
+    sidecar_meta = load_sidecar_metadata_from_path(sidecar_path)
+    size_bytes = os.path.getsize(candidate_path) if os.path.isfile(candidate_path) else 0
+
+    # 2. Collect files to delete
+    files_to_delete = [candidate_path]
+    if os.path.exists(sidecar_path):
+        files_to_delete.append(sidecar_path)
+
+    # Check for local cover specified in sidecar metadata
+    if sidecar_meta and isinstance(sidecar_meta.get("local_cover"), str):
+        local_cover = sidecar_meta["local_cover"].strip()
+        if local_cover:
+            norm_cover = os.path.normpath(local_cover)
+            cov_drive, _ = os.path.splitdrive(norm_cover)
+            if not cov_drive and not os.path.isabs(norm_cover):
+                cov_path = os.path.abspath(os.path.join(target_dir, norm_cover))
+                try:
+                    if os.path.commonpath([target_dir, cov_path]) == target_dir and os.path.exists(cov_path):
+                        if cov_path not in files_to_delete:
+                            files_to_delete.append(cov_path)
+                except ValueError:
+                    pass
+
+    # Check for standard cover files based on base_name
+    for ext in (".jpg", ".jpeg", ".png", ".webp"):
+        cand_cov = os.path.join(target_dir, f"{base_name}{ext}")
+        if os.path.exists(cand_cov) and cand_cov not in files_to_delete:
+            files_to_delete.append(cand_cov)
+
+    # Check for partial download file (.part)
+    part_path = f"{candidate_path}.part"
+    if os.path.exists(part_path) and part_path not in files_to_delete:
+        files_to_delete.append(part_path)
+
+    # 3. Delete files safely
+    deleted_files = []
+    for path in files_to_delete:
+        try:
+            if os.path.isdir(path):
+                import shutil
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+            deleted_files.append(os.path.basename(path))
+        except OSError:
+            logger.exception("Failed to delete file: %s", path)
+
+    # 4. Remove from library index
+    cached_index = _load_library_index()
+    entries = cached_index.get("entries", {})
+    if entry_key in entries:
+        del entries[entry_key]
+        _save_library_index(entries)
+
+    # 5. Remove bookmarks and clear last_active
+    book_id_aliases = bookmark_service.build_book_id_aliases(
+        name=entry_key,
+        size_bytes=size_bytes,
+        metadata=sidecar_meta,
+    )
+    for alias in book_id_aliases:
+        bookmark_service.delete_bookmark(alias)
+
+    return {
+        "status": "success",
+        "file_name": entry_key,
+        "deleted_files": deleted_files,
+    }

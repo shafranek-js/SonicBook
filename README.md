@@ -9,7 +9,7 @@ SonicBook is a local web app for downloading, organizing, and listening to audio
 - **Fast and safe downloads:** HLS fragment concurrency, resumable direct MP3 downloads, controlled multi-range acceleration for large direct files when the server supports `Range`, and automatic fallback to stable single-stream downloading.
 - **Clear progress UI:** Download and assembly stages are shown separately through SSE updates, including real assembly progress when FFmpeg reports it.
 - **Integrated player:** Browser playback for local files with M4B chapters, ZIP playlist playback, chapter panel, keyboard shortcuts, Media Session integration, cover art, and progress fills.
-- **Local library:** A sliding left panel with search, grouped states (`Now Listening`, `In Queue`, `Completed`), cached metadata indexing, reset progress, and completed/not-completed controls.
+- **Local library:** A sliding left panel with search, grouped states (`Now Listening`, `In Queue`, `Completed`), cached metadata indexing, reset progress, delete audiobooks from disk, and completed/not-completed controls.
 - **Google Drive library:** Browse a Drive folder, stream supported remote books without importing, import books into the local library, and manually refresh cached Drive listings.
 - **Shared Drive folder links:** Settings accepts either a raw Drive `folderId` or a shared Google Drive folder URL. Public/shared folders can be browsed without OAuth when access allows it.
 - **Shared playback progress:** Server-side bookmarks sync progress between browsers/devices connected to the same SonicBook instance and profile.

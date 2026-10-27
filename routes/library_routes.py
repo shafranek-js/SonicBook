@@ -119,6 +119,22 @@ async def get_imported_book_ids():
     return {"book_ids": library_service.list_library_book_ids(config.DOWNLOADS_DIR)}
 
 
+@router.delete("/api/library/files/{file_name:path}")
+async def delete_library_file(file_name: str):
+    file_path = resolve_download_path(file_name)
+    if not await asyncio.to_thread(os.path.exists, file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        return await asyncio.to_thread(library_service.delete_library_book, file_name, config.DOWNLOADS_DIR)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to delete library file: %s", file_name)
+        raise HTTPException(status_code=500, detail="Failed to delete file") from exc
+
+
 @router.get("/api/files/{file_name:path}")
 async def download_file(file_name: str, request: Request):
     file_path = resolve_download_path(file_name)

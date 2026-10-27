@@ -288,6 +288,8 @@ Build an advanced integrated web player to stream the downloaded audiobooks dire
   Add lightweight JSDoc typedefs for core app/player/library/progress state so future Vanilla JS changes have better editor support without enabling global TypeScript checking.
 - [x] 59. **Harden environment variable parsing:**
   Add bounded env parsing helpers for download tuning and FFmpeg path settings so invalid `.env` values log warnings and fall back/clamp instead of crashing with raw `ValueError`.
+- [x] 61. **Add audiobook deletion with companion file cleanup:**
+  Allow users to delete audiobooks directly from the library UI with a confirmation prompt. Safely removes the audio file, metadata sidecar, local cover art, and temporary parts from disk, removes the entry from `library_index.json`, clears stored bookmarks and active playback pointer, and resets the player if the deleted book was currently loaded.
 
 ## Deferred UX Exploration
 

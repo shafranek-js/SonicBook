@@ -162,6 +162,10 @@ function handleLibraryAction(action, fileName, event) {
         resetBookProgress(event, fileName);
         return;
     }
+    if (action === 'delete') {
+        void deleteLibraryBook(event, fileName);
+        return;
+    }
     if (action === 'complete') {
         void toggleBookCompleted(event, fileName);
         return;
@@ -239,6 +243,11 @@ function renderLibraryItem(file, t) {
                         data-library-action="reset"
                         data-file="${safeName}"
                         title="${escapeHtml(t.resetTooltip)}">↺</button>
+                <button class="library-quick-btn library-quick-delete"
+                        type="button"
+                        data-library-action="delete"
+                        data-file="${safeName}"
+                        title="${escapeHtml(t.deleteTooltip)}">&#128465;</button>
             </div>
         </div>
     `;
@@ -720,6 +729,50 @@ async function resetBookProgress(event, fileName) {
             document.getElementById('timelineFill').style.width = '0%';
         }
         loadLibrary();
+    }
+}
+
+async function deleteLibraryBook(event, fileName) {
+    event.stopPropagation();
+    const t = i18n[appState.currentLang];
+    const confirmMessage = t.confirmDeleteBook || 'Are you sure you want to delete this audiobook and its files from disk?';
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+
+    const row = event.target.closest('.library-item');
+    const bookId = row?.dataset.bookId || buildClientBookId(fileName);
+
+    try {
+        const res = await fetch('/api/library/files/' + encodeURIComponent(fileName), {
+            method: 'DELETE'
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.detail || t.deleteError || 'Delete failed');
+        }
+
+        if (playerState.fileName === fileName) {
+            if (typeof resetActivePlayer === 'function') {
+                resetActivePlayer();
+            } else if (!audio.paused) {
+                audio.pause();
+                audio.removeAttribute('src');
+                audio.load();
+            }
+        }
+
+        localStorage.removeItem('bookmark_' + fileName);
+        if (bookId) {
+            delete appState.bookmarks[bookId];
+            delete appState.bookmarks[buildLegacyClientBookId(fileName)];
+            delete appState.bookmarks[buildClientBookId(fileName)];
+        }
+
+        setStatusMessage(t.bookDeleted || 'Audiobook deleted', 'success');
+        await loadLibrary();
+    } catch (e) {
+        setStatusMessage(String(e.message || e), 'error');
     }
 }
 

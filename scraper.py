@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 def log_debug(message):
     logger.info(message)
 
+DEFAULT_BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
 # Persistent Playwright browser instance
 playwright_instance = None
 browser_instance = None
@@ -450,6 +452,62 @@ async def _extract_playwright_data(page, res, book_url):
 
     await page.goto(book_url, wait_until="domcontentloaded", timeout=30000)
 
+    # Dedicated extraction for akniga.org via page JS context
+    if "akniga.org" in book_url or await page.evaluate("() => typeof plh !== 'undefined' && typeof plh.getHres === 'function'"):
+        akniga_data = await page.evaluate("""async () => {
+            try {
+                let bid = (typeof page_bid !== 'undefined' && page_bid) || parseInt(document.querySelector('article')?.getAttribute('data-bid'));
+                if (!bid) return null;
+                let hasPlh = typeof plh !== 'undefined' && typeof plh.getHres === 'function';
+                if (!hasPlh) return null;
+
+                let hlsRes = (typeof bookData !== 'undefined' && bookData && bookData[bid] && bookData[bid].hres) ? bookData[bid] : null;
+                if (!hlsRes) {
+                    let token = await new Promise(r => {
+                        if (typeof ls !== 'undefined' && ls.ajax) {
+                            ls.ajax.load(aRouter['ajax'] + 'player/token', {bid: bid}, function(res) {
+                                r(res && res.token);
+                            }, {showProgress: false, onError: () => r(null)});
+                        } else {
+                            r(null);
+                        }
+                    });
+                    if (token) {
+                        hlsRes = await new Promise(r => {
+                            ls.ajax.load(aRouter['ajax'] + 'b/' + bid, {bid: bid, token: token, hls: 'true'}, function(res) {
+                                r(res);
+                            }, {showProgress: false, onError: () => r(null)});
+                        });
+                    }
+                }
+
+                if (hlsRes && hlsRes.hres) {
+                    let hlsUrl = plh.getHres(hlsRes.hres);
+                    let items = hlsRes.items ? (typeof hlsRes.items === 'string' ? JSON.parse(hlsRes.items) : hlsRes.items) : [];
+                    let chapters = items.map(i => ({
+                        title: i.title || i.name || "Chapter",
+                        start: parseFloat(i.time_from_start || i.start || 0),
+                        end: parseFloat(i.time_finish || i.end || 0)
+                    }));
+                    return {
+                        m3u8: hlsUrl,
+                        title: hlsRes.title || '',
+                        chapters: chapters
+                    };
+                }
+            } catch (e) {
+                console.warn('akniga player extract error:', e);
+            }
+            return null;
+        }""")
+        if akniga_data and akniga_data.get("m3u8"):
+            res["m3u8"] = akniga_data["m3u8"]
+            if akniga_data.get("chapters"):
+                res["chapters"] = akniga_data["chapters"]
+            if akniga_data.get("title") and res["title"] == "audiobook":
+                res["title"] = sanitize_filename(akniga_data["title"])
+            log_debug(f"Akniga fast extraction succeeded: m3u8 found, {len(res['chapters'])} chapters")
+
     for _ in range(15):
         if res["m3u8"]: break
         if _ == 5:
@@ -525,7 +583,7 @@ async def _parse_browser_based(book_url, res):
         if browser_instance:
             log_debug("Using persistent Playwright browser instance")
             try:
-                context = await browser_instance.new_context()
+                context = await browser_instance.new_context(user_agent=DEFAULT_BROWSER_USER_AGENT, locale="ru-RU")
                 page = await context.new_page()
             except (PlaywrightError, OSError, RuntimeError) as e:
                 log_debug(f"Persistent browser context failed, attempting respawn: {e}")
@@ -533,7 +591,7 @@ async def _parse_browser_based(book_url, res):
                 await init_browser()
                 if not browser_instance:
                     raise RuntimeError("Failed to respawn browser instance")
-                context = await browser_instance.new_context()
+                context = await browser_instance.new_context(user_agent=DEFAULT_BROWSER_USER_AGENT, locale="ru-RU")
                 page = await context.new_page()
 
             await _extract_playwright_data(page, res, book_url)
@@ -545,10 +603,12 @@ async def _parse_browser_based(book_url, res):
             log_debug("Persistent browser not found, launching temporary instance...")
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
+                context = await browser.new_context(user_agent=DEFAULT_BROWSER_USER_AGENT, locale="ru-RU")
+                page = await context.new_page()
                 
                 await _extract_playwright_data(page, res, book_url)
 
+                await context.close()
                 await browser.close()
     except (PlaywrightError, OSError, RuntimeError) as e:
         playwright_failure = describe_playwright_issue(e)

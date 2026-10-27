@@ -38,6 +38,7 @@ def sonicbook_server(tmp_path, monkeypatch):
     downloads_dir = tmp_path / "downloads"
     work_dir = tmp_path / "work"
     downloads_dir.mkdir()
+    (downloads_dir / "sample_e2e_book.mp3").write_bytes(b"dummy audio data")
 
     monkeypatch.setattr(config, "SETTINGS_FILE", str(tmp_path / "settings.json"))
     monkeypatch.setattr(config, "DOWNLOADS_DIR", str(downloads_dir))
@@ -109,6 +110,13 @@ def test_frontend_shell_settings_sleep_timer_and_library_sources(sonicbook_serve
         page.locator("#libBtn").click()
         expect(page.locator("#libraryPanel")).to_be_visible()
         expect(page.locator("#libraryList")).to_be_visible()
+        row = page.locator(".library-item").first
+        row.hover()
+        delete_btn = page.locator("[data-library-action='delete']").first
+        expect(delete_btn).to_be_visible()
+        page.once("dialog", lambda dialog: dialog.accept())
+        delete_btn.click()
+        expect(page.locator("[data-library-action='delete']")).not_to_be_visible()
 
         page.locator("[data-testid='settings-button']").click()
         settings_menu = page.locator("[data-testid='settings-menu']")

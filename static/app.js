@@ -98,7 +98,11 @@ const i18n = {
         resetTooltip: "Reset playback progress",
         confirmReset: "Are you sure you want to reset progress for this book?",
         markCompletedTooltip: "Mark as completed",
-        markUncompletedTooltip: "Mark as not completed"
+        markUncompletedTooltip: "Mark as not completed",
+        deleteTooltip: "Delete audiobook from disk",
+        confirmDeleteBook: "Are you sure you want to delete this audiobook and all its files from disk? This cannot be undone.",
+        bookDeleted: "Audiobook deleted from disk.",
+        deleteError: "Failed to delete audiobook."
     },
     ru: {
         placeholder: "Вставьте ссылку...",
@@ -183,7 +187,11 @@ const i18n = {
         resetTooltip: "Сбросить прогресс прослушивания",
         confirmReset: "Вы уверены, что хотите сбросить прогресс для этой книги?",
         markCompletedTooltip: "Отметить как прослушанную",
-        markUncompletedTooltip: "Снять отметку о завершении"
+        markUncompletedTooltip: "Снять отметку о завершении",
+        deleteTooltip: "Удалить аудиокнигу с диска",
+        confirmDeleteBook: "Вы уверены, что хотите удалить эту аудиокнигу и все её файлы с диска? Это действие необратимо.",
+        bookDeleted: "Аудиокнига удалена с диска.",
+        deleteError: "Не удалось удалить аудиокнигу."
     }
 };
 

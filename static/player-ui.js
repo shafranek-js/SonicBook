@@ -1428,5 +1428,52 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
+function resetActivePlayer() {
+    if (!audio.paused) {
+        audio.pause();
+    }
+    audio.removeAttribute('src');
+    audio.load();
+    clearPlayerCover();
+    playerState.fileName = '';
+    playerState.bookTitle = '';
+    playerState.bookId = '';
+    playerState.bookmarkKey = '';
+    playerState.mode = '';
+    playerState.chapters = [];
+    playerState.playlist = [];
+    playerState.duration = 0;
+    playerState.currentTime = 0;
+    playerState.currentTrackIndex = 0;
+    localStorage.removeItem('last-played-file');
+    localStorage.removeItem('last-played-source');
+    localStorage.removeItem('last-played-book-id');
+    appState.playerReturnState = null;
+    appState.showPlayer = false;
+    setPlayButtonState(false);
+    const timelineFill = document.getElementById('timelineFill');
+    if (timelineFill) timelineFill.style.width = '0%';
+    const timeCurrent = document.getElementById('timeCurrent');
+    if (timeCurrent) timeCurrent.innerText = formatTime(0);
+    const timeTotal = document.getElementById('timeTotal');
+    if (timeTotal) timeTotal.innerText = formatTime(0);
+    const playerTitleEl = document.getElementById('playerTitle');
+    if (playerTitleEl) playerTitleEl.innerText = '';
+    const container = document.getElementById('appContainer');
+    if (container) {
+        container.classList.remove('panel-open');
+        localStorage.setItem('panel-open', 'false');
+    }
+    appState.step = 'start';
+    syncDownloadProgressVisibility();
+    updateUI();
+    syncResponsivePanelWidths();
+    try {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'none';
+        }
+    } catch (e) {}
+}
+
 initPlayerChapterInteractions();
 initSleepTimer();

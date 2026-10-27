@@ -9,7 +9,8 @@ from library_service import (
     load_sidecar_metadata_from_path,
     _sidecar_json_path,
     load_sidecar_metadata,
-    get_file_duration_seconds
+    get_file_duration_seconds,
+    delete_library_book
 )
 
 class TestLibraryService(unittest.TestCase):
@@ -133,6 +134,63 @@ class TestLibraryService(unittest.TestCase):
         mock_result.stdout = "-10\n"
         result = get_file_duration_seconds("fake.mp3")
         self.assertIsNone(result)
+
+    def test_delete_library_book_success(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            book_file = os.path.join(temp_dir, "test_book.m4b")
+            with open(book_file, "wb") as f:
+                f.write(b"fake audio data")
+
+            meta_file = os.path.join(temp_dir, "test_book.json")
+            with open(meta_file, "w", encoding="utf-8") as f:
+                json.dump({"title": "Test Book", "local_cover": "custom_cov.png"}, f)
+
+            custom_cov = os.path.join(temp_dir, "custom_cov.png")
+            with open(custom_cov, "wb") as f:
+                f.write(b"fake image data")
+
+            cand_cov = os.path.join(temp_dir, "test_book.jpg")
+            with open(cand_cov, "wb") as f:
+                f.write(b"fake jpg cover")
+
+            part_file = os.path.join(temp_dir, "test_book.m4b.part")
+            with open(part_file, "wb") as f:
+                f.write(b"fake part")
+
+            index_file = os.path.join(temp_dir, "library_index.json")
+            with open(index_file, "w", encoding="utf-8") as f:
+                json.dump({"version": 1, "entries": {"test_book.m4b": {"size_bytes": 100}}}, f)
+
+            with patch("library_service.LIBRARY_INDEX_FILE", index_file),                  patch("bookmark_service.delete_bookmark") as mock_del_bmk:
+                result = delete_library_book("test_book.m4b", downloads_dir=temp_dir)
+
+                self.assertEqual(result["status"], "success")
+                self.assertEqual(result["file_name"], "test_book.m4b")
+                self.assertFalse(os.path.exists(book_file))
+                self.assertFalse(os.path.exists(meta_file))
+                self.assertFalse(os.path.exists(custom_cov))
+                self.assertFalse(os.path.exists(cand_cov))
+                self.assertFalse(os.path.exists(part_file))
+
+                # Verify index update
+                with open(index_file, "r", encoding="utf-8") as f:
+                    updated_index = json.load(f)
+                self.assertNotIn("test_book.m4b", updated_index["entries"])
+
+                # Verify bookmark deletion was called
+                self.assertTrue(mock_del_bmk.called)
+
+    def test_delete_library_book_invalid_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(ValueError):
+                delete_library_book("../../etc/passwd", downloads_dir=temp_dir)
+            with self.assertRaises(ValueError):
+                delete_library_book("", downloads_dir=temp_dir)
+
+    def test_delete_library_book_not_found(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(FileNotFoundError):
+                delete_library_book("nonexistent.m4b", downloads_dir=temp_dir)
 
 if __name__ == '__main__':
     unittest.main()

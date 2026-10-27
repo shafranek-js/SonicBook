@@ -123,6 +123,7 @@
     transition: opacity 0.18s ease, transform 0.18s ease;
 }
 .library-item:hover .library-item-actions,
+.library-item:focus-within .library-item-actions,
 .library-item.active-lib .library-item-actions {
     opacity: 1;
     transform: translateX(0);
@@ -159,6 +160,15 @@
 .library-quick-complete.is-completed:hover {
     border-color: rgba(52, 211, 153, 0.42);
     background: linear-gradient(180deg, rgba(16, 185, 129, 0.18), rgba(16, 185, 129, 0.08));
+}
+.library-quick-delete {
+    color: var(--muted);
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.library-quick-delete:hover {
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.35);
+    background: linear-gradient(180deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05));
 }
 .library-quick-stream {
     width: auto;
